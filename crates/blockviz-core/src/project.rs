@@ -816,7 +816,8 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
     let mut externals: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
     for pf in &py.files {
         for e in &pf.externals {
-            if !e.is_empty() && !is_stdlib(e) {
+            // (Ruby's are its gems: `sqlite3` is no standard module there.)
+            if !e.is_empty() && (pf.lang == code::syntax::Lang::Ruby || !is_stdlib(e)) {
                 externals.entry(e.clone()).or_default().insert(pf.file);
             }
         }
