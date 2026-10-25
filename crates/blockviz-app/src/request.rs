@@ -18,15 +18,20 @@ pub enum Spec {
     Refs(String, String),
     /// `B` against where it left `A` (`A...B`, as GitHub compares).
     MergeBase(String, String),
+    /// One commit: the change it made, against its parent.
+    Commit(String),
 }
 
 impl Spec {
-    /// `worktree`, `staged`, `branch`, `A..B` or `A...B`. A revision starting with `-` would be read by git as an option.
+    /// `worktree`, `staged`, `branch`, `A..B`, `A...B` or `REV^!` (one commit). A revision starting with `-` would be read by git as an option.
     pub fn parse(s: &str) -> Result<Spec, String> {
         let pair = |sep: &str| -> Option<Result<(String, String), String>> {
             let (a, b) = s.split_once(sep)?;
             Some(if a.is_empty() || b.is_empty() { Err(format!("`{s}` needs a revision on each side of `{sep}`.")) } else if a.starts_with('-') || b.starts_with('-') { Err(format!("`{s}` names a revision starting with `-`.")) } else { Ok((a.into(), b.into())) })
         };
+        if let Some(rev) = s.strip_suffix("^!") {
+            return if rev.is_empty() || rev.starts_with('-') || rev.contains("..") { Err(format!("`{s}` needs a plain revision before `^!`.")) } else { Ok(Spec::Commit(rev.into())) };
+        }
         match s {
             "worktree" => Ok(Spec::Worktree),
             "staged" => Ok(Spec::Staged),
@@ -35,7 +40,7 @@ impl Spec {
                 Some(r) => r.map(|(a, b)| Spec::MergeBase(a, b)),
                 None => match pair("..") {
                     Some(r) => r.map(|(a, b)| Spec::Refs(a, b)),
-                    None => Err(format!("`{s}` is not worktree, staged, branch, A..B or A...B.")),
+                    None => Err(format!("`{s}` is not worktree, staged, branch, A..B, A...B or REV^!.")),
                 },
             },
         }
@@ -145,11 +150,12 @@ mod tests {
         assert_eq!(Spec::parse("v1..main"), Ok(Spec::Refs("v1".into(), "main".into())));
         assert_eq!(Spec::parse("main...feature/x"), Ok(Spec::MergeBase("main".into(), "feature/x".into())));
         assert_eq!(Spec::parse("HEAD~3..HEAD"), Ok(Spec::Refs("HEAD~3".into(), "HEAD".into())));
+        assert_eq!(Spec::parse("abc123^!"), Ok(Spec::Commit("abc123".into())));
     }
 
     #[test]
     fn rejects_the_rest() {
-        for bad in ["", "uncommitted", "a..", "..b", "...", "--output=x..main", "main...-x"] {
+        for bad in ["", "uncommitted", "a..", "..b", "...", "--output=x..main", "main...-x", "^!", "-x^!", "a..b^!"] {
             assert!(Spec::parse(bad).is_err(), "{bad}");
         }
     }

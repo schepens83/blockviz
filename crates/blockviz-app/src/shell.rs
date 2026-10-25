@@ -399,12 +399,12 @@ impl Viewer {
                     }
                 }
                 if !self.log.is_empty() {
-                    menu = menu.child(div().px(px(10.0)).pt(px(8.0)).pb(px(4.0)).text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(ui.faint).child("SINCE A COMMIT"));
+                    menu = menu.child(div().px(px(10.0)).pt(px(8.0)).pb(px(4.0)).text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(ui.faint).child("A COMMIT"));
                     for (i, c) in self.log.iter().enumerate() {
-                        let (sha, short, subject) = (c.sha.clone(), c.short.clone(), c.subject.clone());
+                        let (sha, subject) = (c.sha.clone(), c.subject.clone());
                         menu = menu.child(
                             self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
-                                .on_click(cx.listener(move |v, _, _, cx| v.compare_since(sha.clone(), short.clone(), subject.clone(), cx))),
+                                .on_click(cx.listener(move |v, _, _, cx| v.compare_commit(sha.clone(), subject.clone(), cx))),
                         );
                     }
                 }

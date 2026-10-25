@@ -424,6 +424,63 @@ fn a_commit_about_to_be_made_is_shown_as_staged_against_head_whatever_is_on_disk
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[gpui::test]
+fn picking_a_commit_shows_just_the_change_it_made_against_its_parent(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("blockviz-commit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@e.c", "-c", "commit.gpgsign=false"]).args(args).current_dir(&dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("a.py"), "def a():\n    return 1\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "first"]);
+    let first = git(&["rev-parse", "HEAD"]);
+    std::fs::write(dir.join("a.py"), "def a():\n    return 2\n").unwrap();
+    std::fs::write(dir.join("b.py"), "def b():\n    return 1\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "second"]);
+    let second = git(&["rev-parse", "HEAD"]);
+    std::fs::write(dir.join("c.py"), "def c():\n    return 1\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "third"]);
+    // Later work on disk, which the commit shown must not include.
+    std::fs::write(dir.join("a.py"), "def a():\n    return 3\n").unwrap();
+    sandbox_home();
+    cx.update(crate::input::bind_keys);
+    let (view, cx) = cx.add_window_view(|window, cx| Viewer::new(window, cx));
+    let shown = |view: &Entity<Viewer>, cx: &mut VisualTestContext, sha: &str, title: &str| {
+        view.update(cx, |v, cx| {
+            v.compare = None;
+            v.open_comparison(dir.clone(), crate::request::Spec::Commit(sha.into()), Some(title.into()), cx)
+        });
+        for _ in 0..100 {
+            frame(cx);
+            if view.read_with(cx, |v, _| v.compare.is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        view.read_with(cx, |v, _| {
+            let c = v.compare.as_ref().expect("comparing");
+            let mut files: Vec<String> = c.diff.files.iter().map(|f| f.path.clone()).collect();
+            files.sort();
+            (files, c.title.clone(), v.snapshot.clone())
+        })
+    };
+    let (files, title, snapshot) = shown(&view, cx, &second, "second");
+    assert_eq!(files, ["a.py", "b.py"]);
+    assert_eq!((title.as_str(), snapshot.as_deref()), ("second", Some(&second[..7])));
+    // The first commit has no parent: all it has is new.
+    let (files, _, snapshot) = shown(&view, cx, &first, "first");
+    assert_eq!(files, ["a.py"]);
+    assert_eq!(snapshot.as_deref(), Some(&first[..7]));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// Opens the details panel and gives its left edge (where the resize handle is) and the pointer's steps.
 fn panel_edge(cx: &mut TestAppContext) -> (Entity<Viewer>, &mut VisualTestContext, Point<Pixels>) {
     let (view, cx) = open(cx);

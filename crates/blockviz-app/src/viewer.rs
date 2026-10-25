@@ -561,6 +561,7 @@ impl Viewer {
         self.snapshot = Some(match &spec {
             Spec::Staged => "staged".into(),
             Spec::Refs(_, b) | Spec::MergeBase(_, b) => b.clone(),
+            Spec::Commit(sha) => sha.chars().take(7).collect(),
             _ => String::new(),
         });
         let trunks = self.trunks;
@@ -581,6 +582,14 @@ impl Viewer {
                         known(&b)?;
                         let base = repo.merge_base(&a, &b).ok_or_else(|| format!("{a} and {b} have no history in common."))?;
                         (repo.files_at(&b), base, "Branch compare", a.clone(), format!("{a}...{b}"))
+                    }
+                    Spec::Commit(rev) => {
+                        known(&rev)?;
+                        let sha = repo.resolve(&rev).unwrap_or(rev);
+                        let short: String = sha.chars().take(7).collect();
+                        let base = repo.parent_of(&sha);
+                        let label = if base == git::NOTHING { "nothing".to_string() } else { format!("{short}^") };
+                        (repo.files_at(&sha), base, "A commit", label, short)
                     }
                     Spec::Worktree | Spec::Branch => return Err("Not a snapshot.".to_string()),
                 };
@@ -659,13 +668,12 @@ impl Viewer {
         cx.notify();
     }
 
-    /// "Since a commit": that commit's own changes and all that came after, up to the folder as it is, so the base is
-    /// what came before it (nothing, for the first commit).
-    pub fn compare_since(&mut self, sha: String, short: String, subject: String, cx: &mut Context<Self>) {
-        let Some(repo) = self.project.as_ref().and_then(|p| p.repo.clone()) else { return };
-        let before = repo.parent_of(&sha);
-        let label = if before == git::NOTHING { "nothing".to_string() } else { format!("{short}^") };
-        self.start_compare(before, "Since a commit (including it)".into(), label, subject, cx);
+    /// "A commit": just the change that commit made, its snapshot against its parent (nothing, for the first commit).
+    pub fn compare_commit(&mut self, sha: String, subject: String, cx: &mut Context<Self>) {
+        match self.project.as_ref().map(|p| p.folder.clone()) {
+            Some(folder) => self.open_comparison(folder, Spec::Commit(sha), Some(subject), cx),
+            None => {}
+        }
     }
 
     /// "This branch": everything since the branch left the default branch.
