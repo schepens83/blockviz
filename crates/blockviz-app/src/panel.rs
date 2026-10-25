@@ -897,7 +897,7 @@ impl Inspector {
                     Status::Removed => "−",
                 };
                 let name = format!("{sign}  {}{}", info.context.as_ref().map(|c| format!("{c} › ")).unwrap_or_default(), info.name);
-                let (hover, peek) = (ui.hover, ch.at);
+                let hover = ui.hover;
                 let mut item = div().flex().flex_col().when(k > 0, |d| d.border_t_1().border_color(ui.line));
                 item = item.child(
                     div()
@@ -908,8 +908,8 @@ impl Inspector {
                         .when(current == Some(i), |d| d.bg(ui.accent_bg).border_l_2().border_color(ui.accent))
                         .hover(move |s| s.bg(hover))
                         .on_hover(cx.listener(move |this, h: &bool, _, cx| {
-                            let target = if *h { Some(peek) } else { None };
-                            this.act(cx, move |v, cx| v.peek(target, cx));
+                            let target = if *h { Some(i) } else { None };
+                            this.act(cx, move |v, cx| v.hover_change(target, cx));
                         }))
                         .child(
                             div()

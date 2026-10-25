@@ -90,9 +90,32 @@ pub mod look {
     pub const GLOW_MIN: f64 = 0.15;
     pub const GLOW_MAX: f64 = 0.4;
     pub const BREATH_SECONDS: f64 = 1.6;
+    /// Pointing at a change by hovering its row: the glow stays at this strength, and nothing is dimmed.
+    pub const HOVER_GLOW: f64 = 0.3;
     /// The edge marker, against its first size.
     pub const MARKER_SCALE: f64 = 1.4;
     pub const MARKER_TEXT: u32 = 0xfafafa;
+}
+
+/// How loud a block is pointed out: the change unfolded in the list (the rest dimmed, the glow breathing), or the
+/// row under the pointer (a calm ring only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Style {
+    Located,
+    Hover,
+}
+
+/// What to draw, in order, for the change unfolded (`marked`) and the one under the pointer (`hovered`), by
+/// index: the same change is drawn once, in the louder style; the hovered one goes on top.
+pub fn plan(marked: Option<usize>, hovered: Option<usize>) -> Vec<(usize, Style)> {
+    let mut out = vec![];
+    if let Some(m) = marked {
+        out.push((m, Style::Located));
+    }
+    if let Some(h) = hovered.filter(|&h| Some(h) != marked) {
+        out.push((h, Style::Hover));
+    }
+    out
 }
 
 /// The glow's strength `t` seconds in: it breathes between its least and its most.
@@ -128,7 +151,7 @@ const LABEL: Font = Font { px: 11.5 * look::MARKER_SCALE, family: Family::Sans, 
 /// Draws what `located` says over the diagram, in the change's color (removed ones dashed): the rest of the view
 /// dimmed, a ring round the block and a glow breathing outside it (`t`, seconds, sets the breath). Returns the
 /// marker's hit area when the block is out of view.
-pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, label: &str, view: Rect, t: f64) -> Option<Rect> {
+pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, label: &str, view: Rect, t: f64, style: Style) -> Option<Rect> {
     use look::*;
     let ink = theme.change(status).ink;
     match located {
@@ -139,9 +162,11 @@ pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, 
             let hole = Rect { x: r.x - HOLE_PAD, y: r.y - HOLE_PAD, w: r.w + 2.0 * HOLE_PAD, h: r.h + 2.0 * HOLE_PAD };
             pen.set_fill(Color::rgba(0, 0, 0, 1.0));
             pen.set_alpha(if within { SCRIM_WITHIN } else if theme.dark { SCRIM_DARK } else { SCRIM_LIGHT } as f64);
-            for b in scrim_rects(view, hole) {
-                if b.w > 0.0 && b.h > 0.0 {
-                    pen.fill_rect(b.x, b.y, b.w, b.h);
+            if style == Style::Located {
+                for b in scrim_rects(view, hole) {
+                    if b.w > 0.0 && b.h > 0.0 {
+                        pen.fill_rect(b.x, b.y, b.w, b.h);
+                    }
                 }
             }
             // The ring, and the glow outside it.
@@ -157,7 +182,7 @@ pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, 
                 pen.stroke();
             };
             let dashed = within || status == Status::Removed;
-            ring(pen, RING_W / 2.0 + GLOW_W / 2.0, GLOW_W, glow_alpha(t), false);
+            ring(pen, RING_W / 2.0 + GLOW_W / 2.0, GLOW_W, if style == Style::Hover { HOVER_GLOW } else { glow_alpha(t) }, false);
             ring(pen, 0.0, if within { RING_W_WITHIN } else { RING_W }, 1.0, dashed);
             pen.restore();
             None
@@ -198,7 +223,8 @@ pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, 
             let tx = if c > 0.0 { area.x + 10.0 * k } else { area.x + 24.0 * k };
             pen.fill_text(&text, tx, area.y + 16.0 * k);
             pen.restore();
-            Some(area)
+            // Hovering a row in the list: the pointer is there, not here; nothing to click.
+            (style == Style::Located).then_some(area)
         }
     }
 }
@@ -278,6 +304,15 @@ mod tests {
         let half = scrim_rects(VIEW, rect(-50.0, 0.0, 100.0, 100.0));
         let covered: f64 = half.iter().map(|b| b.w * b.h).sum();
         assert!((covered - (VIEW.w * VIEW.h - 50.0 * 50.0)).abs() < 1e-6, "{covered}");
+    }
+
+    #[test]
+    fn a_change_is_drawn_once_and_the_hovered_one_on_top() {
+        assert_eq!(plan(None, None), vec![]);
+        assert_eq!(plan(Some(2), None), vec![(2, Style::Located)]);
+        assert_eq!(plan(None, Some(5)), vec![(5, Style::Hover)]);
+        assert_eq!(plan(Some(2), Some(2)), vec![(2, Style::Located)]);
+        assert_eq!(plan(Some(2), Some(5)), vec![(2, Style::Located), (5, Style::Hover)]);
     }
 
     #[test]

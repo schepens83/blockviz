@@ -152,6 +152,8 @@ pub struct Viewer {
     pub changes_open: bool,
     /// The change unfolded in the changes list and outlined in the diagram, as its index among the changes.
     pub marked: Option<usize>,
+    /// The change row under the pointer.
+    pub hovered_change: Option<usize>,
     /// Where the pointer to an off-screen marked block is drawn this frame, and the block.
     pub(crate) marker: Option<(crate::camera::Rect, u32)>,
     /// When the window opened: the clock the glow breathes by.
@@ -234,6 +236,7 @@ impl Viewer {
             removed_sel: None,
             changes_open: true,
             marked: None,
+            hovered_change: None,
             marker: None,
             started: Instant::now(),
             snapshot: None,
@@ -912,28 +915,42 @@ impl Viewer {
 
     /// Over the diagram, where the change unfolded in the list is: kept up for as long as it is unfolded.
     fn draw_located(&mut self, m: &Rc<Model>, width: f64, height: f64, window: &mut Window, cx: &mut Context<Self>, origin: (f64, f64)) {
+        use crate::locate::{self, Style};
         self.marker = None;
         if !self.panel_shows_changes() {
             return;
         }
-        let (Some(target), Some(change)) = (self.marked_block(), self.compare.as_ref().and_then(|c| c.diff.changes.get(self.marked?).copied())) else { return };
-        let mut ancestors = vec![];
-        let mut up = m.node(target).parent;
-        while let Some(a) = up {
-            ancestors.push(a);
-            up = m.node(a).parent;
-        }
-        let view = crate::locate::view_rect(width, height, self.insets());
-        let at = self.camera.screen_box(m, &m.canonical_path(target));
-        let Some(located) = crate::locate::locate(target, &ancestors, &self.hits, at, view) else { return };
-        let label = crate::diff::block_name(m, m.node(target));
+        let view = locate::view_rect(width, height, self.insets());
         let t = self.started.elapsed().as_secs_f64();
-        let mut pen = GpuiPen::new(window, cx, origin);
-        if let Some(area) = crate::locate::draw(&mut pen, &self.theme, located, change.status, &label, view, t) {
-            self.marker = Some((area, target));
+        for (i, style) in locate::plan(self.marked, self.hovered_change) {
+            let Some(change) = self.compare.as_ref().and_then(|c| c.diff.changes.get(i).copied()) else { continue };
+            let target = if change.status == crate::diff::Status::Removed { change.at } else { change.id };
+            let mut ancestors = vec![];
+            let mut up = m.node(target).parent;
+            while let Some(a) = up {
+                ancestors.push(a);
+                up = m.node(a).parent;
+            }
+            let at = self.camera.screen_box(m, &m.canonical_path(target));
+            let Some(located) = locate::locate(target, &ancestors, &self.hits, at, view) else { continue };
+            let label = crate::diff::block_name(m, m.node(target));
+            let mut pen = GpuiPen::new(window, cx, origin);
+            if let Some(area) = locate::draw(&mut pen, &self.theme, located, change.status, &label, view, t, style) {
+                self.marker = Some((area, target));
+            }
+            // The glow of the unfolded change breathes for as long as it is pointed out.
+            if style == Style::Located {
+                window.request_animation_frame();
+            }
         }
-        // The glow breathes for as long as the block is pointed out.
-        window.request_animation_frame();
+    }
+
+    /// The change row under the pointer (None: none): its block is pointed out, calmly, while it is.
+    pub fn hover_change(&mut self, i: Option<usize>, cx: &mut Context<Self>) {
+        if self.hovered_change != i {
+            self.hovered_change = i;
+            cx.notify();
+        }
     }
 
     /// The block in the diagram a marked change is: itself, or for a removed one the block it was in.
