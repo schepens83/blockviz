@@ -51,6 +51,8 @@ pub enum Hl {
 /// Highlights `text` as the language its `path` implies.
 pub fn highlight(path: &str, text: &str) -> Vec<u32> {
     let (_, lang) = classify(path);
+    // A script without an extension says what it is in its first line (`bin/rails`).
+    let lang = if crate::ruby::is_ruby(path, text) { "Ruby" } else { lang };
     highlight_lang(lang, path, text)
 }
 
