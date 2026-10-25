@@ -3,6 +3,7 @@
 //! several events, a checkout many) to settle, and analyzes the project again,
 //! reusing what the core parsed of every file that did not change.
 
+use crate::ignores::Ignores;
 use crate::model::Model;
 use blockviz_core::project::{build_cached, ignored, Cache, InFile};
 use notify::{EventKind, RecursiveMode, Watcher};
@@ -54,22 +55,27 @@ enum Msg {
     Ask(Ask),
 }
 
+/// The folder's files, less what its `.gitignore` files and the list of folders never read leave out.
 pub fn read(root: &Path) -> Files {
+    read_with(root, &Ignores::new(root))
+}
+
+fn read_with(root: &Path, ignores: &Ignores) -> Files {
     let mut out = Files::new();
-    walk(root, root, &mut out);
+    walk(root, root, ignores, &mut out);
     out
 }
 
-fn walk(dir: &Path, root: &Path, out: &mut Files) {
+fn walk(dir: &Path, root: &Path, ignores: &Ignores, out: &mut Files) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let p = e.path();
         let rel = relative(root, &p);
         if p.is_dir() {
-            if !ignored(&format!("{rel}/x")) {
-                walk(&p, root, out);
+            if !ignored(&format!("{rel}/x")) && !ignores.ignored(&rel, true) {
+                walk(&p, root, ignores, out);
             }
-        } else if !ignored(&rel) {
+        } else if !ignored(&rel) && !ignores.ignored(&rel, false) {
             out.insert(rel, read_file(&p));
         }
     }
@@ -96,18 +102,29 @@ pub fn texts(files: &Files) -> HashMap<String, String> {
 
 /// Brings `files` up to date with what is on disk at `paths` (files or
 /// folders, added, changed or removed). Returns the files whose text changed.
-pub fn apply(root: &Path, files: &mut Files, paths: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+pub fn apply(root: &Path, ignores: &Ignores, files: &mut Files, paths: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+    let paths: Vec<PathBuf> = paths.into_iter().collect();
+    // What is ignored changed: read the whole folder again.
+    if paths.iter().any(|p| Ignores::affects(&relative(root, p))) {
+        ignores.reset();
+        let now = read_with(root, ignores);
+        let mut changed: Vec<String> = files.keys().chain(now.keys()).filter(|k| files.get(*k).map(|f| &f.text) != now.get(*k).map(|f| &f.text)).cloned().collect();
+        changed.sort();
+        changed.dedup();
+        *files = now;
+        return changed;
+    }
     let mut changed = vec![];
     for p in paths {
         let rel = relative(root, &p);
-        if rel.is_empty() || ignored(&format!("{rel}/x")) {
+        if rel.is_empty() || ignored(&format!("{rel}/x")) || ignores.ignored(&rel, p.is_dir()) {
             continue;
         }
         let prefix = format!("{rel}/");
         if p.is_dir() {
             // A folder added, moved in or out, or changed wholesale: read it again.
             let mut now = Files::new();
-            walk(&p, root, &mut now);
+            walk(&p, root, ignores, &mut now);
             let gone: Vec<String> = files.range(prefix.clone()..).take_while(|(k, _)| k.starts_with(&prefix)).map(|(k, _)| k.clone()).filter(|k| !now.contains_key(k)).collect();
             for k in gone {
                 files.remove(&k);
@@ -120,7 +137,7 @@ pub fn apply(root: &Path, files: &mut Files, paths: impl IntoIterator<Item = Pat
                 }
             }
         } else if p.is_file() {
-            if ignored(&rel) {
+            if ignored(&rel) || ignores.ignored(&rel, false) {
                 continue;
             }
             let f = read_file(&p);
@@ -166,7 +183,8 @@ pub fn open(root: PathBuf, shared_trunks: bool, send: impl Fn(Update) -> bool + 
         let mut opts = blockviz_core::layout::Options { shared_trunks };
         let mut cache = Cache::default();
         let reading = Instant::now();
-        let mut files = read(&root);
+        let ignores = Ignores::new(&root);
+        let mut files = read_with(&root, &ignores);
         let read_took = reading.elapsed();
         let analyze = |files: &Files, opts: blockviz_core::layout::Options, cache: &mut Cache| {
             let start = Instant::now();
@@ -226,7 +244,7 @@ pub fn open(root: PathBuf, shared_trunks: bool, send: impl Fn(Update) -> bool + 
             }
             paths.sort();
             paths.dedup();
-            let changed = apply(&root, &mut files, paths);
+            let changed = apply(&root, &ignores, &mut files, paths);
             if changed.is_empty() && !relayout {
                 continue;
             }
@@ -253,27 +271,72 @@ mod tests {
         std::fs::write(dir.join("pkg/b.py"), "y = 2\n").unwrap();
         std::fs::create_dir_all(dir.join("node_modules/dep")).unwrap();
         std::fs::write(dir.join("node_modules/dep/index.js"), "").unwrap();
+        let ig = Ignores::new(&dir);
         let mut files = read(&dir);
         assert_eq!(files.keys().collect::<Vec<_>>(), ["a.py", "pkg/b.py"]);
 
         // A file saved with the same text is no change; a new text is.
         std::fs::write(dir.join("a.py"), "x = 1\n").unwrap();
-        assert!(apply(&dir, &mut files, [dir.join("a.py")]).is_empty());
+        assert!(apply(&dir, &ig, &mut files, [dir.join("a.py")]).is_empty());
         std::fs::write(dir.join("a.py"), "x = 3\n").unwrap();
-        assert_eq!(apply(&dir, &mut files, [dir.join("a.py")]), ["a.py"]);
+        assert_eq!(apply(&dir, &ig, &mut files, [dir.join("a.py")]), ["a.py"]);
         assert_eq!(files["a.py"].text.as_deref(), Some("x = 3\n"));
 
         // Ignored folders stay out; a folder removed takes its files with it.
         std::fs::write(dir.join("node_modules/dep/index.js"), "changed").unwrap();
-        assert!(apply(&dir, &mut files, [dir.join("node_modules/dep/index.js")]).is_empty());
+        assert!(apply(&dir, &ig, &mut files, [dir.join("node_modules/dep/index.js")]).is_empty());
         std::fs::remove_dir_all(dir.join("pkg")).unwrap();
-        assert_eq!(apply(&dir, &mut files, [dir.join("pkg")]), ["pkg/b.py"]);
+        assert_eq!(apply(&dir, &ig, &mut files, [dir.join("pkg")]), ["pkg/b.py"]);
         assert!(!files.contains_key("pkg/b.py"));
 
         // A folder moved in is read whole.
         std::fs::create_dir_all(dir.join("new")).unwrap();
         std::fs::write(dir.join("new/c.py"), "z = 1\n").unwrap();
-        assert_eq!(apply(&dir, &mut files, [dir.join("new")]), ["new/c.py"]);
+        assert_eq!(apply(&dir, &ig, &mut files, [dir.join("new")]), ["new/c.py"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn leaves_out_what_gitignore_says_at_first_and_as_files_come_and_go() {
+        let dir = std::env::temp_dir().join(format!("blockviz-live-ignore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |path: &str, text: &str| {
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write(".gitignore", "*.log\ntmp/\n!keep.log\n");
+        write("a.py", "x = 1\n");
+        write("debug.log", "noise");
+        write("keep.log", "kept");
+        write("tmp/scratch.py", "y = 1\n");
+        write("pkg/.gitignore", "gen.py\n");
+        write("pkg/gen.py", "z = 1\n");
+        write("pkg/real.py", "z = 2\n");
+        // Dot folders were always read: they hold workflows and the like.
+        write(".github/workflows/ci.yml", "on: push\n");
+        let ig = Ignores::new(&dir);
+        let mut files = read(&dir);
+        let names = |f: &Files| f.keys().cloned().collect::<Vec<_>>();
+        assert_eq!(names(&files), [".github/workflows/ci.yml", ".gitignore", "a.py", "keep.log", "pkg/.gitignore", "pkg/real.py"]);
+
+        // New files: an ignored one stays out, another comes in.
+        write("new.log", "x");
+        write("tmp/more.py", "q = 1\n");
+        write("pkg/gen.py", "z = 3\n");
+        write("b.py", "w = 1\n");
+        let paths = ["new.log", "tmp/more.py", "pkg/gen.py", "b.py"].map(|p| dir.join(p));
+        assert_eq!(apply(&dir, &ig, &mut files, paths), ["b.py"]);
+        // A folder moved in is read without what it ignores.
+        write("other/.gitignore", "skip.py\n");
+        write("other/skip.py", "s = 1\n");
+        write("other/use.py", "u = 1\n");
+        assert_eq!(apply(&dir, &ig, &mut files, [dir.join("other")]), ["other/.gitignore", "other/use.py"]);
+
+        // Editing .gitignore (no more tmp/, no more !keep.log, now b.py) reads everything again.
+        write(".gitignore", "*.log\nb.py\n");
+        assert_eq!(apply(&dir, &ig, &mut files, [dir.join(".gitignore")]), [".gitignore", "b.py", "keep.log", "tmp/more.py", "tmp/scratch.py"]);
+        assert!(!files.contains_key("b.py") && !files.contains_key("keep.log") && files.contains_key("tmp/scratch.py"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

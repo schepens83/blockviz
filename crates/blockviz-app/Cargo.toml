@@ -9,6 +9,8 @@ publish = false
 blockviz-core = { path = "../blockviz-core" }
 # Shaders are compiled as the app starts: building them ahead needs Xcode's separate Metal Toolchain.
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+# Reading .gitignore files (ripgrep's matcher), so ignored files are not part of the project.
+ignore = "0.4"
 # Receiving new analyses from the thread that makes them.
 futures = "0.3"
 # Round joins for the diagram's lines (the tessellator GPUI draws paths with).
