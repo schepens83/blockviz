@@ -15,6 +15,8 @@ npm run dev          # http://127.0.0.1:5173 (run `npm run wasm` once first)
 npm test             # vitest + cargo test
 ```
 
+The wasm build compiles Prism (the Ruby parser, in C) with clang for `wasm32`. Linux distributions' clang has that target; Apple's does not, so on macOS install LLVM (`brew install llvm`) and point the build at it: `export CC_wasm32_unknown_unknown=$(brew --prefix llvm)/bin/clang`.
+
 Open a GitHub repository (`#github=owner/repo` in the URL works too), a local folder (picker or drag-and-drop), or paste a single file. The bundled example is [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT) (MIT), which also serves as the main test fixture. `tests/corpus.rs` checks the abstractions on trimmed snapshots of a FastAPI app, httpx, nanochat, Flask, a Django site and HTTPie; `tests/corpus_js.rs` does the same for an Express API, a Next.js app, a NestJS service, a React/Vite app, ky, serve and a Turborepo workspace; `tests/corpus_rust.rs` for mini-redis, fd, ripgrep's core crate, a workspace of axum examples and llama2.rs; `tests/corpus_go.rs` for groupcache, a gin RealWorld API, redcon, chi, glow and golang/example; `tests/corpus_ruby.rs` for lobsters (a Rails app), mission_control-jobs (a Rails engine) and thor. `cargo test --test audit -- --ignored --nocapture` reports the blocks most likely to read badly (code-like titles, guard tags, empty branch arms) across all five corpora.
 
 A command-line view of the same analysis helps when tuning abstractions:
