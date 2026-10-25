@@ -1,4 +1,5 @@
 import { browserCache, type RepoCache, type SavedFile, type SavedRepo } from './cache';
+import { gitignores } from './gitignore';
 import type { CompareInfo, Comparison, FileChange, InputFile, LeftOut, Project } from './types';
 
 // Keep in step with `IGNORED_DIRS` in crates/blockviz-core/src/project.rs.
@@ -77,7 +78,11 @@ export async function exampleProject(): Promise<Project> {
 }
 
 /** A local project's files, within its limits, in the order they were found. */
-async function readFiles(entries: { path: string; file: () => Promise<File> }[], progress: Progress): Promise<Pick<Project, 'files' | 'leftOut'>> {
+async function readFiles(all: { path: string; file: () => Promise<File> }[], progress: Progress): Promise<Pick<Project, 'files' | 'leftOut'>> {
+  // What the folder's `.gitignore` files leave out is not the project (logs, caches, build output).
+  const ignoreFiles = all.filter(e => (e.path === '.gitignore' || e.path.endsWith('/.gitignore')) && !ignoredPath(e.path));
+  const ignores = gitignores(await Promise.all(ignoreFiles.map(async e => [e.path, await (await e.file()).text()] as [string, string])));
+  const entries = all.filter(e => !ignores.ignored(e.path));
   const { first, more } = firstFiles(entries);
   const found = new Map(entries.map((e, i) => [e, i]));
   const files = await Promise.all(first.map(async e => {
