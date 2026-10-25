@@ -222,3 +222,22 @@ export const smoothstep = (a: number, b: number, v: number) => {
   const t = clamp((v - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
 };
+
+/**
+ * How far to move the camera so a box (in screen units) is in view, clear of
+ * the overlays and `margin` from their edges: not at all if it is, just far
+ * enough if it sticks out, centered if it is off screen. A box too big to fit
+ * shows its start.
+ */
+export function panToReveal(b: Box, width: number, height: number, i: Insets, margin = 24): { dx: number; dy: number } {
+  const axis = (lo: number, hi: number, from: number, to: number) => {
+    if (lo >= from && hi <= to) return 0;
+    if (hi < from || lo > to) return hi - lo >= to - from ? from - lo : (from + to) / 2 - (lo + hi) / 2;
+    if (hi - lo >= to - from) return lo <= from && hi >= to ? 0 : from - lo;
+    return lo < from ? from - lo : to - hi;
+  };
+  return {
+    dx: axis(b.x, b.x + b.w, i.left + margin, width - i.right - margin),
+    dy: axis(b.y, b.y + b.h, i.top + margin, height - i.bottom - margin),
+  };
+}

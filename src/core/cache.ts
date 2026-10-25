@@ -1,4 +1,4 @@
-import type { CompareInfo, InputFile, LeftOut } from './types';
+import type { CompareInfo, InputFile, LeftOut } from './types.ts';
 
 /** A file as downloaded, with the hash GitHub names its content by. */
 export interface SavedFile extends InputFile { sha?: string }

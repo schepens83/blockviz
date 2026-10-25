@@ -55,6 +55,8 @@ Open a pull request (`github.com/owner/repo/pull/123`) or a comparison (`…/com
 
 Both versions are analyzed (the head and the commit it branched off its base) and matched block by block: files by path through renames, folders by name or contents, blocks by kind and title, code moved within a file followed to its new place. Only files the change touched have changes, and a dependency still implied through others is neither new nor removed.
 
+A repository on your machine can be read the same way. In the Open dialog, "Choose repository…" opens your system's folder dialog (zenity or kdialog on Linux, the Finder dialog on macOS, PowerShell on Windows; any folder inside a repository will do), and the last eight repositories are one click away; a path can be typed instead. Then choose what to compare, or use an address: a branch against `main` (or `master`) from where it branched off, as GitHub does (`#git=/path/to/repo&head=feature&base=main`); two exact revisions, each picked from a list of branches, tags and recent commits (searchable; `HEAD~3` or a full sha can be used too), with a warning when After is older than Before so a diff never runs backwards by accident (`#git=/path/to/repo&mode=refs&base=v1.0&head=main`); or the uncommitted changes, the files on disk (untracked ones too, ignored ones not) against HEAD (`#git=/path/to/repo&mode=worktree`). The browser cannot run git, so the dev server (`npm run dev`, or `npm run preview`) does it with the `git` command; a static build cannot. Nothing is uploaded, and the endpoints (`/__git/…`) answer only the page the server serves.
+
 ### Abstraction rules
 
 The goal is blocks a reader would name, not a syntax tree.

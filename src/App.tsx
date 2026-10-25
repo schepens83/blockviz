@@ -1,8 +1,8 @@
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, GitPullRequest, Home, Info, Link, Maximize, Minus, Moon, Plus, Search as SearchIcon, Split, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Analyzer } from './core/analyzer';
-import { directoryProject, droppedProject, exampleProject, folderProject, githubComparison, githubProject, isComparison, MAX_FILES, MAX_TOTAL, parseGitHub, pastedProject, type Progress } from './core/loaders';
-import type { Comparison, Project, Scene } from './core/types';
+import { directoryProject, droppedProject, exampleProject, folderProject, githubComparison, githubProject, gitComparison, type GitCompare, isComparison, MAX_FILES, MAX_TOTAL, parseGitHub, pastedProject, type Progress } from './core/loaders';
+import type { CompareInfo, Comparison, Project, Scene } from './core/types';
 import { SceneDiff } from './canvas/diff';
 import { Engine, type EdgeRef, type ViewState } from './canvas/engine';
 import { blockSvg } from './canvas/svg';
@@ -14,6 +14,7 @@ import { drawnIn, type Paint } from './canvas/renderer';
 import { DARK, legend, LIGHT, swatch, type Theme } from './canvas/theme';
 import { blockName, ChangesPanel, RemovedDetails } from './ui/ChangesPanel';
 import { Highlights } from './core/highlights';
+import { changesIn } from './ui/scope';
 import { clampPanel, DEFAULT_PANEL, Inspector, type PanelSize } from './ui/Inspector';
 import { OpenDialog, type OpenRequest } from './ui/OpenDialog';
 import { Search } from './ui/Search';
@@ -21,6 +22,7 @@ import { Breadcrumbs } from './ui/Breadcrumbs';
 import { hashParam, hashParams, Navigation, pushProject } from './ui/navigation';
 import { NARROW } from './ui/media';
 import { toggleScheme, useDark } from './ui/scheme';
+import { addRecent, readRecent } from './ui/recent';
 import { Store } from './ui/store';
 
 /** A change being read: both versions of the code and how the head (on screen) differs from the base. */
@@ -31,6 +33,11 @@ interface Loaded { project: Project; scene: Scene; model: SceneModel; highlights
 /** A GitHub link's code: a repository, or both versions of a pull request or comparison. */
 function fromGitHub(url: string, progress: Progress, signal: AbortSignal, latest = false): Promise<Project | Comparison> {
   return isComparison(parseGitHub(url)) ? githubComparison(url, progress, { latest, signal }) : githubProject(url, progress, { latest, signal });
+}
+
+/** A local comparison's short name: the branch, `base..head`, or the working tree. */
+function localLabel({ mode, baseRef, headRef }: CompareInfo): string {
+  return mode === 'refs' ? `${baseRef}..${headRef}` : headRef;
 }
 
 /** What a large project's limits left out, said briefly (null: nothing). */
@@ -99,6 +106,10 @@ export default function App() {
   const [changesOpen, setChangesOpen] = useState(true);
   /** Reading a change: a block it removed (a base block), shown in the panel. */
   const [removedSel, setRemovedSel] = useState<number | null>(null);
+  /** The change unfolded in the changes list and marked in the diagram, as its index (-1: none). */
+  const [marked, setMarked] = useState(-1);
+  /** Whether the changes list is limited to what the view is zoomed into (remembered). */
+  const [scoped, setScoped] = useState(() => storage.get('blockviz.scoped') !== '0');
   /** The block under the pointer: a store, not state, so that only the code lines it tints re-render. */
   const [hover] = useState(() => new Store<number | null>(null));
   /** The details panel's size as the reader chose it (remembered), and as it fits this window. */
@@ -167,6 +178,7 @@ export default function App() {
       setSelectedPath(null);
       setValue(null);
       setRemovedSel(null);
+      setMarked(-1);
       setChangesOpen(true);
       setView({ path: [] });
       setLoaded({ project, scene: result.scene, model, highlights: new Highlights(analyzer.current, model), elapsed, compare });
@@ -195,13 +207,20 @@ export default function App() {
 
   const open = useCallback((r: OpenRequest) => {
     // The URL names the project only when a link can load it again.
-    if (r.kind !== 'github') pushProject(nav.current, location.pathname + location.search);
+    if (r.kind !== 'github' && r.kind !== 'git') pushProject(nav.current, location.pathname + location.search);
     if (r.kind === 'example') void load(() => exampleProject());
     if (r.kind === 'github') {
       storage.set('blockviz.github', r.url);
       pushProject(nav.current, `#github=${encodeURIComponent(r.url.replace(/^https?:\/\//, ''))}`);
       // Opened on purpose: check GitHub for the latest commit (a reload or a link opens the saved copy).
       void load((p, signal) => fromGitHub(r.url, p, signal, true));
+    }
+    if (r.kind === 'git') {
+      storage.set('blockviz.git.recent', JSON.stringify(addRecent(readRecent(storage.get('blockviz.git.recent')), r.repo)));
+      const how: GitCompare = r.mode === 'worktree' ? { mode: 'worktree' } : { mode: r.mode, base: r.base, head: r.head };
+      // A branch comparison names no mode, as links did before there were others.
+      pushProject(nav.current, `#git=${encodeURIComponent(r.repo)}${r.mode === 'branch' ? '' : `&mode=${r.mode}`}${how.mode === 'worktree' ? '' : `&base=${encodeURIComponent(how.base)}&head=${encodeURIComponent(how.head)}`}`);
+      void load((p, signal) => gitComparison(r.repo, how, p, signal));
     }
     if (r.kind === 'folder') void load(p => folderProject(r.files, p));
     if (r.kind === 'directory') void load(p => directoryProject(r.handle, p));
@@ -211,7 +230,13 @@ export default function App() {
   // First load: a shared GitHub link, else the bundled example.
   const loadFromUrl = useCallback(() => {
     const repo = hashParam('github');
-    if (repo) void load((p, signal) => fromGitHub(repo, p, signal));
+    const local = hashParam('git');
+    if (local) {
+      const mode = hashParam('mode');
+      const how: GitCompare = mode === 'worktree' ? { mode } : { mode: mode === 'refs' ? mode : 'branch', base: hashParam('base') || 'main', head: hashParam('head') ?? '' };
+      void load((p, signal) => gitComparison(local, how, p, signal));
+    }
+    else if (repo) void load((p, signal) => fromGitHub(repo, p, signal));
     else void load(() => exampleProject());
   }, [load]);
   useEffect(() => {
@@ -237,9 +262,12 @@ export default function App() {
     e.setDiff(loaded.compare?.diff ?? null);
     engine.current = e;
     if (import.meta.env.DEV) (window as unknown as { __engine: Engine }).__engine = e;
-    const repo = hashParams().get('github');
+    const params = hashParams();
+    // What loaded this project: its GitHub link, or its repository and branches.
+    const loadedBy = ['github', 'git', 'mode', 'base', 'head'].flatMap((k): [string, string][] => (params.has(k) ? [[k, params.get(k)!]] : []));
+    const same = () => ['github', 'git', 'mode', 'base', 'head'].every(k => hashParams().get(k) === params.get(k));
     const n = new Navigation(
-      loaded.model, e, `${loaded.project.source}#${loaded.scene.nodes.length}`, repo ? [['github', repo]] : [],
+      loaded.model, e, `${loaded.project.source}#${loaded.scene.nodes.length}`, loadedBy,
       sel => { setSelected(sel?.id ?? null); setSelectedPath(sel?.path ?? null); },
       () => setSteps({ back: n.canBack, forward: n.canForward }),
     );
@@ -248,7 +276,7 @@ export default function App() {
     const pop = (ev: PopStateEvent) => {
       // An entry of another project (or a link to one): load that project.
       if (!n.pop(ev.state)) loadFromUrl();
-      else if ((hashParam('github') ?? '') !== (repo ? decodeURIComponent(repo) : '')) loadFromUrl();
+      else if (!same()) loadFromUrl();
     };
     window.addEventListener('popstate', pop);
     setValue(null);
@@ -262,7 +290,17 @@ export default function App() {
 
   useEffect(() => nav.current?.setSelection(selected !== null && selectedPath ? { id: selected, path: selectedPath } : null), [selected, selectedPath]);
 
-  useEffect(() => engine.current?.select(selected), [selected]);
+  // What is selected, else the change marked in the list, is outlined in the diagram.
+  const markedChange = loaded?.compare?.diff.changes[marked];
+  const markedBlock = markedChange ? (markedChange.status === 'removed' ? markedChange.at : markedChange.id) : null;
+  useEffect(() => engine.current?.select(selected ?? markedBlock), [selected, markedBlock]);
+  // A block just marked is pointed out for a moment, wherever it is on screen.
+  useEffect(() => {
+    if (markedBlock === null) return;
+    engine.current?.peek(markedBlock);
+    const t = setTimeout(() => engine.current?.peek(null), 1200);
+    return () => clearTimeout(t);
+  }, [markedBlock]);
 
   // A block pointed out from the details panel stops being pointed out when the panel shows something else.
   useEffect(() => engine.current?.peek(null), [selected, value, removedSel, changesOpen]);
@@ -305,6 +343,13 @@ export default function App() {
   /** Where the change being read is among the changes (-1: what is selected is not one). */
   const changeIndex = !compare ? -1 : removedSel !== null ? compare.diff.indexOf(removedSel, true) : selected !== null ? compare.diff.indexOf(selected) : -1;
 
+  /** The changes the list shows: those in the block the view is zoomed into, or all. */
+  const scope = view.path[view.path.length - 1] ?? loaded?.model.root ?? 0;
+  const visible = useMemo(() => {
+    if (!compare) return [];
+    return scoped ? changesIn(compare.diff.head, compare.diff.changes, scope) : compare.diff.changes.map((_, i) => i);
+  }, [compare, scoped, scope]);
+
   /** Goes to a change: selects its block (or shows the removed one) and flies to it. */
   const goToChange = useCallback((i: number) => {
     const c = compare?.diff.changes[i];
@@ -324,10 +369,18 @@ export default function App() {
 
   /** The next (`delta` 1) or previous (-1) change from the one being read, round the list. */
   const stepChange = useCallback((delta: number) => {
-    const n = compare?.diff.changes.length ?? 0;
-    if (!n) return;
-    goToChange(changeIndex < 0 ? (delta > 0 ? 0 : n - 1) : (changeIndex + delta + n) % n);
-  }, [compare, changeIndex, goToChange]);
+    if (!compare?.diff.changes.length) return;
+    // With the list in view, steps mark within it and keep the zoom; reading a change's details, they go to the next.
+    const listing = !!compare && changesOpen && selected === null && removedSel === null;
+    const order = listing ? visible : compare!.diff.changes.map((_, k) => k);
+    if (!order.length) return;
+    const at = order.indexOf(listing && marked >= 0 ? marked : changeIndex);
+    const next = order[at < 0 ? (delta > 0 ? 0 : order.length - 1) : (at + delta + order.length) % order.length];
+    if (!listing) return goToChange(next);
+    setMarked(next);
+    const c = compare!.diff.changes[next];
+    engine.current?.revealNode(c.status === 'removed' ? c.at : c.id);
+  }, [compare, changeIndex, goToChange, changesOpen, selected, removedSel, visible, marked]);
 
   /** Selects a block for a line of source, staying in the instance being read. */
   const pick = useCallback((id: number) => {
@@ -427,7 +480,7 @@ export default function App() {
               onClick={() => { setSelected(null); setSelectedPath(null); setValue(null); setRemovedSel(null); setChangesOpen(true); }}
             >
               <GitPullRequest size={13} />
-              <span className="cc-num">{compare.comparison.info.kind === 'pr' ? `#${compare.comparison.info.number}` : 'compare'}</span>
+              <span className="cc-num">{compare.comparison.info.kind === 'pr' ? `#${compare.comparison.info.number}` : compare.comparison.info.kind === 'local' ? localLabel(compare.comparison.info) : 'compare'}</span>
               {view.path.length <= 1 && <span className="cc-title">{compare.comparison.info.title}</span>}
               <span className="cc-counts">
                 <b className="added">+{compare.diff.summary.added}</b>
@@ -566,10 +619,18 @@ export default function App() {
           diff={compare.diff}
           info={compare.comparison.info}
           size={fitted}
-          current={changeIndex}
+          current={marked >= 0 ? marked : changeIndex}
+          marked={visible.includes(marked) ? marked : -1}
+          visible={visible}
+          scope={scope}
+          scoped={scoped}
+          highlights={loaded!.highlights}
+          baseHighlights={compare.baseHighlights}
           onResize={setPanel}
           onClose={() => setChangesOpen(false)}
           onGo={goToChange}
+          onMark={setMarked}
+          onScoped={on => { setScoped(on); storage.set('blockviz.scoped', on ? '1' : '0'); }}
           onPeek={id => engine.current?.peek(id)}
         />
       )}
@@ -593,7 +654,7 @@ export default function App() {
       {dragging && <div className="drop-hint">Drop a folder to visualize it</div>}
 
       {dialog === 'open' && (
-        <OpenDialog onOpen={open} onClose={() => setDialog(null)} canClose={!!loaded} lastUrl={storage.get('blockviz.github') || 'github.com/karpathy/nanoGPT'} />
+        <OpenDialog onOpen={open} onClose={() => setDialog(null)} canClose={!!loaded} lastUrl={storage.get('blockviz.github') || 'github.com/karpathy/nanoGPT'} recent={readRecent(storage.get('blockviz.git.recent'))} />
       )}
       {dialog === 'open' && error && <div className="toast over" role="alert">{error}</div>}
       {dialog === 'search' && loaded && <Search model={loaded.model} onPick={id => { setDialog(null); goTo(id); }} onClose={() => setDialog(null)} />}
