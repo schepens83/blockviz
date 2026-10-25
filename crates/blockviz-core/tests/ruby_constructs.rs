@@ -184,3 +184,30 @@ fn a_ruby_executable_and_its_main_guard() {
     // `if __FILE__ == $0` runs the file as a program.
     assert!(file(&s, "lib/tool.rb").badges.contains(&"entry point".to_string()));
 }
+
+#[test]
+fn rake_files_are_ruby_and_their_tasks_functions() {
+    let rake = "namespace :db do\n  desc \"Load the sample stories\"\n  task seed_stories: :environment do\n    Story.create!(title: \"hi\")\n  end\nend\n";
+    let s = analyze(&[
+        ("Gemfile", "gem \"rails\"\n"),
+        ("Rakefile", "require_relative \"config/application\"\n\ntask default: :test\n"),
+        ("lib/tasks/stories.rake", rake),
+        ("bin/setup", "#!/usr/bin/env ruby\nputs \"setting up\"\n"),
+        ("app/models/story.rb", "class Story < ApplicationRecord\nend\n"),
+    ]);
+    // Ruby whatever the file is called, and highlighted as Ruby.
+    for path in ["Gemfile", "Rakefile", "lib/tasks/stories.rake", "bin/setup"] {
+        assert_eq!(s.files.iter().find(|f| f.path == path).unwrap().language, "Ruby", "{path}");
+    }
+    assert!(blockviz_core::highlight_source("lib/tasks/stories.rake", rake).len() > 2);
+    assert!(blockviz_core::highlight_source("bin/setup", "#!/usr/bin/env ruby\nputs 1\n").len() > 2);
+    // A task is a function named by its full name; a namespace is no block.
+    let tasks = file(&s, "lib/tasks/stories.rake");
+    assert_eq!(tasks.subtitle, "tasks");
+    let seed = def(&s, tasks, "db:seed_stories");
+    assert_eq!(seed.subtitle, "rake task");
+    assert!(seed.badges.contains(&"loads app".to_string()));
+    assert_eq!(seed.doc, "Load the sample stories");
+    assert!(!descendants(&s, tasks).iter().any(|n| n.title == "namespace" || n.title == "db"));
+    assert_eq!(def(&s, file(&s, "Rakefile"), "default").subtitle, "rake task");
+}

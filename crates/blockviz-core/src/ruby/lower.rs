@@ -97,12 +97,17 @@ pub struct Lower<'a> {
     method: Vec<String>,
     /// Comment offsets that document a definition.
     pub docs: Vec<usize>,
+    /// A Rake file: `namespace` and `task` define tasks.
+    rake: bool,
+    /// The namespaces a task is in, and the `desc` waiting for the next task.
+    rake_scope: Vec<String>,
+    desc: Option<String>,
 }
 
 impl<'a> Lower<'a> {
     pub fn new(src: &'a str, path: &'a str, input: usize, consts: &'a Consts, primary: &'a Map<String, usize>, requires: &'a Requires<'a>, comments: &[(TextRange, String)]) -> Self {
         let comments = comments.iter().map(|(r, t)| (u32::from(r.start()), u32::from(r.end()), t.clone())).collect();
-        Lower { src, path, input, consts, primary, requires, comments, nesting: vec![], scope: vec![], method: vec![], docs: vec![] }
+        Lower { src, path, input, consts, primary, requires, comments, nesting: vec![], scope: vec![], method: vec![], docs: vec![], rake: false, rake_scope: vec![], desc: None }
     }
 
     fn of(&self, r: TextRange) -> &str {
@@ -111,6 +116,9 @@ impl<'a> Lower<'a> {
 
     pub fn program(&mut self, root: &Node<'_>) -> Vec<Stmt> {
         let Some(p) = root.as_program_node() else { return vec![] };
+        // A Rakefile, a `.rake` file, or code whose top level defines tasks (an engine's `tasks.rb`).
+        let base = self.path.rsplit('/').next().unwrap_or(self.path);
+        self.rake = base == "Rakefile" || base.ends_with(".rake") || p.statements().body().iter().any(|n| n.as_call_node().is_some_and(|c| c.receiver().is_none() && matches!(c.name().as_slice(), b"namespace" | b"task" | b"desc")));
         self.statements(Some(p.statements()), &Dest::None)
     }
 
@@ -386,6 +394,11 @@ impl<'a> Lower<'a> {
         let r = range(&c.location());
         let method = text(&c.name());
         let args: Vec<Node<'_>> = c.arguments().map(|a| a.arguments().iter().collect()).unwrap_or_default();
+        if self.rake && c.receiver().is_none() && self.scope.is_empty() && self.method.is_empty() {
+            if let Some(out) = self.rake_stmt(c, &method, &args, r) {
+                return out;
+            }
+        }
         // A Gemfile: `gem "x"` is a package the project depends on.
         let gemfile = self.path.rsplit('/').next().is_some_and(|b| b == "Gemfile" || b == "gems.rb");
         if gemfile && c.receiver().is_none() {
@@ -491,6 +504,49 @@ impl<'a> Lower<'a> {
         }
         let e = self.call(c);
         self.value(e, dest, r)
+    }
+
+    /// Rake: `namespace :db do`, `desc "…"`, `task seed: :environment do … end`.
+    /// A task is a function named by its full name (`db:seed`), a namespace is no block.
+    fn rake_stmt(&mut self, c: &CallNode<'_>, method: &str, args: &[Node<'_>], r: TextRange) -> Option<Vec<Stmt>> {
+        match method {
+            "namespace" => {
+                let name = args.first().and_then(string_value)?;
+                self.rake_scope.push(name);
+                let body = self.block_body(c.block());
+                self.rake_scope.pop();
+                Some(body)
+            }
+            "desc" => {
+                self.desc = args.first().and_then(string_value);
+                Some(vec![])
+            }
+            "task" | "multitask" => {
+                // `task :name`, `task name: :deps`, `task "a:b" => :deps`, `task :name, [:arg] => :deps`.
+                let (name, deps) = match args.first() {
+                    Some(a) if string_value(a).is_some() => (string_value(a), args.get(1).and_then(|h| h.as_keyword_hash_node()).and_then(|h| h.elements().iter().next()).and_then(|e| e.as_assoc_node().map(|a| a.value()))),
+                    Some(a) => {
+                        let first = a.as_keyword_hash_node().and_then(|h| h.elements().iter().next()).and_then(|e| e.as_assoc_node());
+                        (first.as_ref().and_then(|e| string_value(&e.key())), first.map(|e| e.value()))
+                    }
+                    None => (None, None),
+                };
+                let name = name?;
+                let full = self.rake_scope.iter().cloned().chain(std::iter::once(name)).collect::<Vec<_>>().join(":");
+                let loads_app = deps.is_some_and(|d| string_value(&d).as_deref() == Some("environment") || d.as_array_node().is_some_and(|a| a.elements().iter().any(|e| string_value(&e).as_deref() == Some("environment"))));
+                let (params, body) = match c.block().and_then(|b| b.as_block_node()) {
+                    Some(b) => (self.block_params(b.parameters()), self.body(b.body(), &Dest::None)),
+                    None => (vec![], vec![]),
+                };
+                let mut decorators = vec![super::rails::role_decorator("rake task", r)];
+                if loads_app {
+                    decorators.push(badge("loads app", r));
+                }
+                let doc = self.desc.take();
+                Some(vec![Stmt::FunctionDef(FunctionDef { name: full, params, body, decorators, returns: None, is_async: false, is_generator: false, kind: DefKind::Function, doc, range: r })])
+            }
+            _ => None,
+        }
     }
 
     /// `n.times`: the numbers below `n`, written as the receiver.
