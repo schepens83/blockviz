@@ -30,5 +30,10 @@ gpui = { version = "=0.2.2", features = ["runtime_shaders", "test-support"] }
 # Its own workspace: GPUI is a large build that the web app's tests and CI never need.
 [workspace]
 
+# GPUI's HTTP client needs xattr 0.2, which names `libc::ENOATTR`: current
+# libc has none for Linux (where it is ENODATA), so on Linux it did not build.
+[patch.crates-io]
+xattr = { path = "patches/xattr" }
+
 [profile.release]
 debug = "line-tables-only"
