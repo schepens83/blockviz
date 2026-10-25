@@ -116,7 +116,7 @@ Everything the app does today, grouped by what you'd use it for. The README expl
 
 - **Programs and the files they exchange**: `prepare.py → train.bin → train.py → ckpt.pt → sample.py`.
 - **Dependencies** between files and folders, transitively reduced so the layering shows.
-- **File roles**: app, routes, script, tests, config, module, binary, library, example, benchmark, build script, notebook, generated.
+- **File roles**: app, routes, script, tests, config, module, binary, library, example, benchmark, build script, notebook, generated; in a Rails app, controller, model, concern, job, mailer, helpers, view, partial and layout; a Ruby executable.
 - **Entry points** come from main guards, `__main__.py`, app objects, Dockerfiles, CI workflows, Makefiles, Compose files and console scripts.
 - **Shell scripts** that run several programs are pipelines.
 - **Docker Compose** is drawn as the system: its services, what each depends on and routes to, and the code each is built from.
@@ -133,15 +133,17 @@ Everything the app does today, grouped by what you'd use it for. The README expl
   - JavaScript: Express, Next.js, NestJS
   - Rust: axum, actix-web, Rocket
   - Go: gin, echo, chi, fiber, gorilla, net/http
+  - Ruby: Rails `config/routes.rb` (and an engine's), as `bin/rails routes` prints it
 - **Commands**: click, Typer, clap, cobra, urfave/cli.
 - **Other roles**:
   - Celery tasks and request hooks
   - React components and hooks
   - Next.js pages and layouts
+  - Rails callbacks and filters (`before save`, `before every action`), background jobs, and the views an action renders
 - **Data**:
   - schemas (zod, yup, joi, valibot, TypeBox, Mongoose) and DTOs are field tables
-  - ORM models are tagged as tables
-  - queries are database steps (SQLAlchemy, Django, Prisma, sqlx, diesel, sea-orm, gorm, pgx and others)
+  - ORM models are tagged as tables; a Rails model has tables of its associations, validations and callbacks
+  - queries are database steps (SQLAlchemy, Django, Prisma, sqlx, diesel, sea-orm, gorm, pgx, Active Record and others)
 
 ## Python
 
@@ -185,6 +187,21 @@ Everything the app does today, grouped by what you'd use it for. The README expl
 - **Errors**: `if err != nil { return err }` is passed on, not drawn. Errors made here are exits named by their message.
 - **Goroutines and channels**: `go`/`defer` are marked; `select`, type switches and channel sends and receives are drawn.
 
+## Ruby
+
+- Prism, Ruby's own parser, built for the browser. It recovers from syntax errors.
+- **Constants, not files**: the files of a project share its classes and modules, each known by its full name (`Admin::UsersController`) and found the way Ruby looks constants up. A Rails app is layered by the constants it names without one `require`; a gem's `require` and `require_relative` lead to its files, and the standard library is not a package.
+- **Ruby's conventions**:
+  - a call without a receiver is the class's own method when it or an ancestor (mixins included) defines it
+  - `Foo.new` constructs a `Foo`, `xs.each do |x|` is a loop, `xs.map { … }` a comprehension, `@x` a field, `xs << x` an append
+  - a method's last expression is its result; `unless`, modifier `if` and `x or raise E` are guards; `rescue` and `ensure` are lanes
+  - a class or module opened only to nest definitions is no block; a class reopened elsewhere leads to its main file
+- **Rails**:
+  - routes name the actions they reach (`GET /stories/:id · GET /s/:id/(:title)`), and `routes.rb` is route tables
+  - models are tables, with their associations, validations and callbacks; concerns and mixins are subtitles
+  - actions end in their responses (`render plain · status 400`), link to the views they render, and run jobs `in background`
+  - Active Record queries are database steps, a chain one step
+
 ## Other files
 
 - Other languages get an outline: definitions, calls between definitions, and C/C++ imports.
@@ -194,7 +211,7 @@ Everything the app does today, grouped by what you'd use it for. The README expl
 ## Limits
 
 - **Static analysis**: arrows show likely dataflow, not a runtime trace.
-- **Not seen**: code passed as strings, monkey-patching, and macros (read by name and arguments, not expanded).
+- **Not seen**: code passed as strings, monkey-patching, and macros (read by name and arguments, not expanded); Ruby's `method_missing`, `define_method` and `send` with computed names.
 - **Partly seen**:
   - generic types are not instantiated
   - a Go interface call is resolved only as far as the program shows which types go in
