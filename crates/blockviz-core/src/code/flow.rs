@@ -3139,6 +3139,11 @@ impl<'c, 'p> Fb<'c, 'p> {
         let mut role = None;
         for d in def.decorators {
             let namer = Namer::plain(src);
+            // Rails: the callback or filter a method is (`before save`, `before every action`).
+            if let (Lang::Ruby, Some(label)) = (self.m.lang, crate::ruby::rails::role(&d.expression)) {
+                role.get_or_insert(frameworks::Role { label: label.to_string(), kind: Handler::Hook });
+                continue;
+            }
             match frameworks::role(&d.expression, def.name, &self.cx.prefixes[&mi], class_prefix.as_deref(), |e| namer.code(e, 24)) {
                 Some(r) if role.is_none() => role = Some(r),
                 Some(_) => {}
@@ -4914,6 +4919,17 @@ fn build_class<'p>(cx: &mut Ctx<'p>, cid: usize, outer: Set<String>, types: &Typ
         }
         cx.b.get_mut(node).rows = rows;
         return;
+    }
+    // Tables a front end read from the class's declarations (Rails' associations, validations…).
+    if modules[mi].lang == Lang::Ruby {
+        for (title, rows) in def.decorators.iter().filter_map(|d| crate::ruby::rails::table(&d.expression)) {
+            let t = cx.b.add(Some(node), Kind::Table, Shape::Box, title);
+            let n = cx.b.get_mut(t);
+            n.category = "config";
+            n.subtitle = naming::count(rows.len(), match title { "filters" => "filter", "callbacks" => "callback", "associations" => "association", _ => "rule" });
+            n.rows = rows.into_iter().map(|(key, value, note)| Row { key, value, note, heading: false }).collect();
+            n.span = Some(src.span(def.range));
+        }
     }
     // Components: what the class is built from.
     let comps: Vec<(String, Ty, String, TextRange)> = cx.ix.classes[cid].fields.iter().filter(|f| is_component(&f.ty)).map(|f| (f.name.clone(), f.ty.clone(), f.ctor.clone(), f.range)).collect();

@@ -224,3 +224,43 @@ fn mission_control_routes_are_the_engines() {
     assert_eq!(action("jobs_controller.rb", "JobsController", "index"), "GET /applications/:application_id/:status/jobs · GET /:status/jobs");
     assert_eq!(action("recurring_tasks_controller.rb", "RecurringTasksController", "update"), "PATCH, PUT /applications/:application_id/recurring_tasks/:id");
 }
+
+fn table<'a>(s: &'a Scene, n: &'a Node, title: &str) -> &'a Node {
+    n.children.iter().map(|&c| &s.nodes[c as usize]).find(|c| c.kind == Kind::Table && c.title == title).unwrap_or_else(|| panic!("{} has no table {title:?}", n.title))
+}
+
+#[test]
+fn lobsters_declarations_are_tables_and_roles() {
+    let s = repo("lobsters");
+    let story = def(&s, file(&s, "app/models/story.rb"), "Story");
+    // Associations, validations and callbacks are tables of the model, never a block per line.
+    let associations = table(&s, story, "associations");
+    let row = |t: &Node, k: &str| t.rows.iter().find(|r| r.key == k).map(|r| (r.value.clone(), r.note.clone()));
+    assert_eq!(row(associations, "user").map(|r| r.0), Some("belongs_to User".to_string()));
+    assert_eq!(row(associations, "comments").map(|r| r.0), Some("has_many Comment".to_string()));
+    let tags = row(associations, "tags").expect("tags");
+    assert_eq!(tags.0, "has_many Tag");
+    assert!(tags.1.contains("through: taggings"), "{tags:?}");
+    let comment = def(&s, file(&s, "app/models/comment.rb"), "Comment");
+    assert!(row(table(&s, comment, "associations"), "notifications").unwrap().1.contains("polymorphic"));
+    assert!(row(table(&s, story, "validations"), "title").unwrap().0.contains("presence"));
+    assert!(!descendants(&s, story).iter().any(|n| matches!(n.title.as_str(), "validates" | "has_many" | "belongs_to")));
+    // Callbacks say when they run; the callbacks table is in the order Rails runs them.
+    let method = |c: &Node, name: &str| def(&s, c, name).subtitle.clone();
+    assert_eq!(method(story, "assign_initial_attributes"), "before validation on create");
+    assert_eq!(method(comment, "record_initial_upvote"), "after commit on create");
+    let callbacks: Vec<&str> = table(&s, story, "callbacks").rows.iter().map(|r| r.value.as_str()).collect();
+    let at = |m: &str| callbacks.iter().position(|c| *c == m).unwrap_or_else(|| panic!("{m} not in {callbacks:?}"));
+    assert!(at("assign_initial_attributes") < at("log_moderation"), "{callbacks:?}");
+    // Scopes are class methods of the model.
+    let hottest = def(&s, story, "hottest");
+    assert!(hottest.badges.contains(&"scope".to_string()) && hottest.badges.contains(&"class method".to_string()), "{:?}", hottest.badges);
+    // Filters: when each runs, from the controller's declarations or a concern's `included do`.
+    let stories = def(&s, file(&s, "app/controllers/stories_controller.rb"), "StoriesController");
+    assert_eq!(method(stories, "find_user_story"), "before destroy, edit, undelete, update");
+    assert!(method(stories, "track_story_reads").starts_with("around show"));
+    let auth = def(&s, file(&s, "app/controllers/concerns/authenticatable.rb"), "Authenticatable");
+    assert_eq!(method(auth, "authenticate_user"), "before every action");
+    let login = def(&s, file(&s, "app/controllers/login_controller.rb"), "LoginController");
+    assert!(table(&s, login, "filters").rows.iter().any(|r| r.key == "skip clear_session_cookie"));
+}

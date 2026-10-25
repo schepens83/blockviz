@@ -710,6 +710,18 @@ impl<'a> Lower<'a> {
                 _ => own.extend(self.stmt(s, &Dest::None)),
             }
         }
+        // Rails' declarations: tables, the roles of the methods they name, scopes.
+        let decl = super::rails::declarations(&own, self.src, |n| self.consts.resolve(&self.nesting, n).unwrap_or_else(|| n.to_string()));
+        for s in &mut own {
+            if let Stmt::FunctionDef(f) = s {
+                if let Some((_, label)) = decl.roles.iter().find(|(m, _)| *m == f.name) {
+                    f.decorators.push(super::rails::role_decorator(label, f.range));
+                }
+            }
+        }
+        let tables: Vec<Decorator> = decl.tables.iter().map(|(title, rows)| super::rails::table_decorator(title, rows, r)).collect();
+        own.extend(decl.uses.into_iter().map(|(class, at)| Stmt::Expr(StmtExpr { value: Box::new(name(class, at)), range: at })));
+        own.extend(decl.scopes.into_iter().map(Stmt::FunctionDef));
         self.scope.pop();
         self.nesting.pop();
         let mut out = vec![];
@@ -731,7 +743,7 @@ impl<'a> Lower<'a> {
             if !is_module && kind != ClassKind::Extension && super::rails::is_model(self.consts, &full) {
                 badges.push(if abstract_ { "abstract" } else { "DB table" });
             }
-            let decorators = badges.iter().map(|b| badge(b, r)).collect();
+            let decorators = badges.iter().map(|b| badge(b, r)).chain(tables).collect();
             out.push(Stmt::ClassDef(ClassDef { name: full, bases, keywords: vec![], body: own, decorators, kind, doc, range: r }));
         }
         out.extend(nested);
