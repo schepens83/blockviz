@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SceneNode } from '../core/types';
-import { childXf, edgeMarker, frame, frameAround, frameReadable, locate, markerArea, NO_INSETS, panToReveal, parentXf, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
+import { childXf, edgeMarker, frame, frameAround, frameReadable, locate, markerArea, NO_INSETS, panToReveal, parentXf, scrimRects, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
 
 const box = (over: Partial<SceneNode> = {}): SceneNode => ({
   id: 1, kind: 'function', shape: 'box', category: 'function', title: 'f',
@@ -248,5 +248,18 @@ describe('pointing out where a change is', () => {
     expect(right.x + right.w).toBeGreaterThan(790);
     const left = markerArea({ x: 10, y: 300, angle: Math.PI }, 80);
     expect(left.x + left.w).toBeGreaterThan(100);
+  });
+});
+
+describe('the spotlight scrim', () => {
+  const view = { x: 0, y: 50, w: 800, h: 500 };
+  const area = (bs: { w: number; h: number }[]) => bs.reduce((a, b) => a + Math.max(0, b.w) * Math.max(0, b.h), 0);
+
+  it('covers the view but for the hole', () => {
+    expect(area(scrimRects(view, { x: 100, y: 150, w: 200, h: 80 }))).toBe(800 * 500 - 200 * 80);
+  });
+
+  it('cuts a hole that hangs out of the view to it', () => {
+    expect(area(scrimRects(view, { x: -50, y: 50, w: 100, h: 100 }))).toBe(800 * 500 - 50 * 100);
   });
 });

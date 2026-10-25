@@ -1,11 +1,34 @@
 import { Camera, type CameraState, type Framing, type Plan } from './camera';
-import { clamp, edgeMarker, locate, markerArea, panToReveal, viewBox, type Box, type Insets, type Xf } from './geometry';
+import { clamp, edgeMarker, locate, markerArea, panToReveal, scrimRects, viewBox, type Box, type Insets, type Xf } from './geometry';
 import type { SceneDiff, Status } from './diff';
 import type { SceneModel } from './model';
 import { Renderer, type EdgeHit, type Paint, type Trace } from './renderer';
 import { svgOf } from './svg';
-import type { Theme } from './theme';
+import { DARK, type Theme } from './theme';
 import { distanceToPolyline } from './trace';
+
+/** How the located block is shown: every number that sets how loud it is. */
+const LOOK = {
+  /** How far the spotlight's hole reaches past the block. */
+  holePad: 8,
+  /** The scrim over the rest of the diagram (alpha of black): darker on a dark theme; lighter when only the block around is cut out. */
+  scrimLight: 0.35,
+  scrimDark: 0.45,
+  scrimWithin: 0.2,
+  /** The ring: how far outside the block, how thick (dashed when it rings the block around). */
+  ringOffset: 4,
+  ringWidth: 4,
+  ringWidthWithin: 3,
+  dash: [9, 6],
+  /** The glow outside the ring, and how it breathes. */
+  glowWidth: 10,
+  glowMin: 0.15,
+  glowMax: 0.4,
+  breathSeconds: 1.6,
+  /** The edge marker, against its first size. */
+  markerScale: 1.4,
+  markerText: '#fafafa',
+};
 
 /** An edge, as its container and its index among the container's edges. */
 export interface EdgeRef { owner: number; index: number }
@@ -414,52 +437,63 @@ export class Engine {
     const view = viewBox(this.width, this.height, this.camera.insets);
     const found = locate(l.id, ancestors, this.renderer.hits, this.screenBox(l.id), view);
     if (!found) return;
-    const ink = this.renderer.theme.change[l.status].ink;
+    const theme = this.renderer.theme;
+    const ink = theme.change[l.status].ink;
     const ctx = this.ctx;
     ctx.save();
     if (found.kind !== 'away') {
       const within = found.kind === 'within';
-      const pad = within ? 4 : 3;
       const { x, y, w, h } = found.box;
-      ctx.beginPath();
-      ctx.roundRect(x - pad, y - pad, w + 2 * pad, h + 2 * pad, 6);
-      ctx.globalAlpha = within ? 0.1 : 0.16;
-      ctx.fillStyle = ink;
-      ctx.fill();
-      ctx.globalAlpha = within ? 0.75 : 1;
-      ctx.strokeStyle = ink;
-      ctx.lineWidth = within ? 2 : 3;
-      ctx.lineJoin = 'round';
-      ctx.setLineDash(within || l.status === 'removed' ? [7, 5] : []);
-      ctx.stroke();
-    } else {
-      const m = edgeMarker(view, found.box, 16);
-      if (m) {
-        ctx.font = '600 11.5px system-ui, sans-serif';
-        const text = l.label.length > 28 ? `${l.label.slice(0, 27)}…` : l.label;
-        const area = markerArea(m, ctx.measureText(text).width + 10);
-        this.marker = area;
+      // The spotlight: the rest of the view dimmed.
+      ctx.fillStyle = '#000';
+      ctx.globalAlpha = within ? LOOK.scrimWithin : theme === DARK ? LOOK.scrimDark : LOOK.scrimLight;
+      const pad = LOOK.holePad;
+      for (const b of scrimRects(view, { x: x - pad, y: y - pad, w: w + 2 * pad, h: h + 2 * pad })) if (b.w > 0 && b.h > 0) ctx.fillRect(b.x, b.y, b.w, b.h);
+      // The glow breathes outside the ring.
+      const o = LOOK.ringOffset;
+      const ring = (grow: number, width: number, alpha: number, dashed: boolean) => {
         ctx.beginPath();
-        ctx.roundRect(area.x, area.y, area.w, area.h, 12);
-        ctx.globalAlpha = 0.94;
-        ctx.fillStyle = this.renderer.theme.paper;
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        ctx.roundRect(x - o - grow, y - o - grow, w + 2 * (o + grow), h + 2 * (o + grow), 8 + grow);
+        ctx.globalAlpha = alpha;
         ctx.strokeStyle = ink;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = width;
+        ctx.lineJoin = 'round';
+        ctx.setLineDash(dashed ? LOOK.dash : []);
         ctx.stroke();
+      };
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const wave = still ? 0.5 : 0.5 + 0.5 * Math.sin((2 * Math.PI * performance.now()) / 1000 / LOOK.breathSeconds);
+      ring(LOOK.ringWidth / 2 + LOOK.glowWidth / 2, LOOK.glowWidth, LOOK.glowMin + (LOOK.glowMax - LOOK.glowMin) * wave, false);
+      ring(0, within ? LOOK.ringWidthWithin : LOOK.ringWidth, 1, within || l.status === 'removed');
+      if (!still) this.invalidate();
+    } else {
+      const k = LOOK.markerScale;
+      const m = edgeMarker(view, found.box, 16 * k);
+      if (m) {
+        ctx.font = `700 ${11.5 * k}px system-ui, sans-serif`;
+        const text = l.label.length > 28 ? `${l.label.slice(0, 27)}…` : l.label;
+        const area = markerArea(m, ctx.measureText(text).width + 10 * k, k);
+        this.marker = area;
+        ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = 2;
+        ctx.beginPath();
+        ctx.roundRect(area.x, area.y, area.w, area.h, 12 * k);
+        ctx.fillStyle = ink;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
         const c = Math.cos(m.angle);
         const s = Math.sin(m.angle);
-        const at = (u: number, v: number): [number, number] => [m.x + u * c - v * s, m.y + u * s + v * c];
+        const at = (u: number, v: number): [number, number] => [m.x + k * (u * c - v * s), m.y + k * (u * s + v * c)];
+        ctx.fillStyle = LOOK.markerText;
         ctx.beginPath();
         ctx.moveTo(...at(6, 0));
         ctx.lineTo(...at(-4, -5));
         ctx.lineTo(...at(-4, 5));
         ctx.closePath();
-        ctx.fillStyle = ink;
         ctx.fill();
         ctx.textAlign = 'left';
-        ctx.fillText(text, c > 0 ? area.x + 10 : area.x + 24, area.y + 16);
+        ctx.fillText(text, c > 0 ? area.x + 10 * k : area.x + 24 * k, area.y + 16 * k);
       }
     }
     ctx.restore();
@@ -542,7 +576,9 @@ export class Engine {
         this.events.onHover?.(id, e.clientX, e.clientY);
         this.invalidate();
       }
-      this.canvas.style.cursor = id === null && !edge ? 'grab' : 'pointer';
+      const m = this.marker;
+      const onMarker = !!m && p.x >= m.x && p.x <= m.x + m.w && p.y >= m.y && p.y <= m.y + m.h;
+      this.canvas.style.cursor = id === null && !edge && !onMarker ? 'grab' : 'pointer';
       return;
     }
     if (this.pointers.size === 2) {

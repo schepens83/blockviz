@@ -285,7 +285,21 @@ export function edgeMarker(view: Box, target: Box, margin: number): Marker | nul
 }
 
 /** The marker's hit area: the arrow and its label, which sits toward the middle of the view. */
-export function markerArea(m: Marker, labelW: number): Box {
-  const w = 24 + labelW;
-  return { x: Math.cos(m.angle) > 0 ? m.x - w + 12 : m.x - 12, y: m.y - 12, w, h: 24 };
+export function markerArea(m: Marker, labelW: number, k = 1): Box {
+  const w = 24 * k + labelW;
+  return { x: Math.cos(m.angle) > 0 ? m.x - w + 12 * k : m.x - 12 * k, y: m.y - 12 * k, w, h: 24 * k };
+}
+
+/** The four bands of `view` around `hole` (cut to the view), for a scrim with a window in it. */
+export function scrimRects(view: Box, hole: Box): [Box, Box, Box, Box] {
+  const x0 = clamp(hole.x, view.x, view.x + view.w);
+  const x1 = clamp(hole.x + hole.w, view.x, view.x + view.w);
+  const y0 = clamp(hole.y, view.y, view.y + view.h);
+  const y1 = clamp(hole.y + hole.h, view.y, view.y + view.h);
+  return [
+    { x: view.x, y: view.y, w: view.w, h: y0 - view.y },
+    { x: view.x, y: y1, w: view.w, h: view.y + view.h - y1 },
+    { x: view.x, y: y0, w: x0 - view.x, h: y1 - y0 },
+    { x: x1, y: y0, w: view.x + view.w - x1, h: y1 - y0 },
+  ];
 }
