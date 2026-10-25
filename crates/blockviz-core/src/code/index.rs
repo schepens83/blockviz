@@ -306,7 +306,10 @@ impl<'p> Index<'p> {
             let mut table: Map<String, Sym> = Map::default();
             for &p in peers {
                 ix.namespace_of[p] = Some(ns);
-                let mut names: Vec<&String> = ix.syms[p].iter().filter(|(_, s)| matches!(s, Sym::Class(_) | Sym::Func(_) | Sym::Var)).map(|(n, _)| n).collect();
+                // Ruby's files share their constants (classes, modules,
+                // `TIMEOUT = 5`), not their top-level methods and variables.
+                let ruby = modules[p].lang == Lang::Ruby;
+                let mut names: Vec<&String> = ix.syms[p].iter().filter(|(n, s)| matches!(s, Sym::Class(_) | Sym::Func(_) | Sym::Var) && (!ruby || n.starts_with(|c: char| c.is_ascii_uppercase()))).map(|(n, _)| n).collect();
                 names.sort();
                 for n in names {
                     table.entry(n.clone()).or_insert(Sym::Member(p, n.clone()));
@@ -623,6 +626,14 @@ impl<'p> Index<'p> {
                         self.externals[mi].insert(krate.to_string());
                     }
                 }
+                // Ruby: gems by what is required of them (`active_support/core_ext`
+                // is `active_support`), not the standard library.
+                None if self.modules[mi].lang == Lang::Ruby => {
+                    let gem = spec.split('/').next().unwrap_or(spec);
+                    if !crate::ruby::is_stdlib(gem) {
+                        self.externals[mi].insert(gem.to_string());
+                    }
+                }
                 None if !spec.starts_with('.') && !spec.starts_with('/') => {
                     let (package, _) = crate::js::resolve::package_name(spec);
                     self.externals[mi].insert(package.to_string());
@@ -772,6 +783,10 @@ impl<'p> Index<'p> {
                 }
                 if self.modules[mi].lang.is_js() && JS_GLOBALS.contains(&name) {
                     Ty::Ext(format!("globals.{name}"))
+                } else if self.modules[mi].lang == Lang::Ruby && name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    // A constant the project does not define is a gem's or Ruby's
+                    // (`Faraday`, `File`): constants are global, never imported.
+                    Ty::Ext(name.replace("::", "."))
                 } else {
                     Ty::Unknown
                 }

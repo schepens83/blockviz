@@ -1770,7 +1770,7 @@ impl<'c, 'p> Fb<'c, 'p> {
 
     fn is_print(&self, c: &ast::ExprCall) -> bool {
         match &*c.func {
-            Expr::Name(n) => matches!(n.id.as_str(), "print" | "pprint") || is_print_macro(&n.id) || is_log_macro(&n.id),
+            Expr::Name(n) => matches!(n.id.as_str(), "print" | "pprint") || is_print_macro(&n.id) || is_log_macro(&n.id) || (self.m.lang == Lang::Ruby && matches!(n.id.as_str(), "puts" | "p" | "pp" | "warn" | "printf" | "say")),
             // `log::info!`, `tracing::warn!`
             Expr::Attribute(a) if is_log_macro(&a.attr) => true,
             // Go: `fmt.Println`, `log.Printf`, `slog.Info`, `logger.Infof`, `fmt.Fprintf(os.Stderr, …)`.
@@ -1785,6 +1785,8 @@ impl<'c, 'p> Fb<'c, 'p> {
             Expr::Attribute(a) => {
                 let base = self.src().of(&*a.value);
                 (base == "console" && matches!(a.attr.as_str(), "log" | "info" | "warn" | "error" | "debug" | "trace" | "table" | "dir" | "group" | "groupEnd" | "time" | "timeEnd"))
+                    // Ruby: `Rails.logger.info`, `$stderr.puts`.
+                    || (self.m.lang == Lang::Ruby && (base.ends_with("logger") && matches!(a.attr.as_str(), "debug" | "info" | "warn" | "error" | "fatal" | "unknown") || matches!(base, "$stdout" | "$stderr" | "STDOUT" | "STDERR") && matches!(a.attr.as_str(), "puts" | "print" | "write" | "printf")))
                     || (matches!(base, "logging" | "logger" | "log" | "LOGGER" | "LOG" | "tqdm" | "sys.stdout" | "sys.stderr" | "warnings" | "pbar")
                     && matches!(a.attr.as_str(), "debug" | "info" | "warning" | "warn" | "error" | "exception" | "critical" | "write" | "set_description" | "set_postfix"))
                     || (base == "pprint" && a.attr.as_str() == "pprint")
@@ -1799,6 +1801,7 @@ impl<'c, 'p> Fb<'c, 'p> {
             Expr::Call(c) if self.is_print(c) => {
                 let label = match &*c.func {
                     Expr::Name(n) if is_log_macro(&n.id) => "logs",
+                    Expr::Name(n) if self.m.lang == Lang::Ruby && n.id == "warn" => "logs",
                     Expr::Name(_) => "prints",
                     // Go's `fmt.Println` prints; loggers log.
                     Expr::Attribute(a) if self.m.lang == Lang::Go && self.src().of(&*a.value) == "fmt" => "prints",
@@ -2371,7 +2374,7 @@ impl<'c, 'p> Fb<'c, 'p> {
     fn raise_stmt(&mut self, s: &'p Stmt, r: &'p ast::StmtRaise) {
         // Named by the exception: `raise ValueError`, not its module path or message.
         let (verb, effect) = match self.m.lang {
-            Lang::Python => ("raise", "raises"),
+            Lang::Python | Lang::Ruby => ("raise", "raises"),
             Lang::JavaScript | Lang::TypeScript => ("throw", "throws"),
             Lang::Rust | Lang::Go => ("error", "returns error"),
         };
@@ -2798,12 +2801,15 @@ impl<'c, 'p> Fb<'c, 'p> {
         let id = self.open_region(Kind::Branch, String::new(), s);
         self.cx.b.get_mut(id).hints.lanes = true;
         self.regions.last_mut().unwrap().merging = true;
-        let mut lanes: Vec<(String, &'p [Stmt])> = vec![("try".into(), body)];
+        let ruby = self.m.lang == Lang::Ruby;
+        let mut lanes: Vec<(String, &'p [Stmt])> = vec![(if ruby { "begin" } else { "try" }.into(), body)];
         for h in handlers {
-            // JavaScript catches everything; Python names what it catches.
+            // JavaScript catches everything; Python and Ruby name what they catch.
             let title = match &h.type_ {
                 _ if self.m.lang.is_js() => "catch".to_string(),
+                Some(t) if ruby => format!("rescue {}", self.namer().code(t, 28)),
                 Some(t) => format!("except {}", self.namer().code(t, 28)),
+                None if ruby => "rescue".into(),
                 None => "except Exception".into(),
             };
             lanes.push((title, &h.body));
@@ -2812,7 +2818,7 @@ impl<'c, 'p> Fb<'c, 'p> {
             lanes.push(("else".into(), orelse));
         }
         if !finalbody.is_empty() {
-            lanes.push(("finally".into(), finalbody));
+            lanes.push((if ruby { "ensure" } else { "finally" }.into(), finalbody));
         }
         for (i, (title, b)) in lanes.into_iter().enumerate() {
             let lane = self.add(Kind::Lane, Shape::Region, title);
@@ -2858,7 +2864,7 @@ impl<'c, 'p> Fb<'c, 'p> {
         // What the arms do still shows: errors, printing, logging.
         let mut effects: BTreeSet<String> = BTreeSet::new();
         let (raises, _) = match self.m.lang {
-            Lang::Python => ("raises", ""),
+            Lang::Python | Lang::Ruby => ("raises", ""),
             Lang::JavaScript | Lang::TypeScript => ("throws", ""),
             Lang::Rust | Lang::Go => ("returns error", ""),
         };
@@ -3120,7 +3126,7 @@ impl<'c, 'p> Fb<'c, 'p> {
         // An object's functions are all its own: none is "static".
         let object = info.class.is_some_and(|k| self.cx.ix.classes[k].def.kind == ast::ClassKind::Object);
         match kind {
-            FnKind::ClassMethod => badges.push("classmethod".into()),
+            FnKind::ClassMethod => badges.push(if self.m.lang == Lang::Ruby { "class method" } else { "classmethod" }.into()),
             // Rust's associated functions (`new`) are not called static.
             FnKind::StaticMethod if !object && self.m.lang != Lang::Rust => badges.push("static".into()),
             FnKind::Property if !self.m.lang.is_js() => badges.push("property".into()),
@@ -4783,7 +4789,9 @@ fn build_class<'p>(cx: &mut Ctx<'p>, cid: usize, outer: Set<String>, types: &Typ
         let n = cx.b.get_mut(node);
         n.kind = Kind::Class;
         n.shape = Shape::Box;
-        n.title = name.clone();
+        // A Ruby class is drawn by its own name (`CreateFile`); its full
+        // name (`Thor::Actions::CreateFile`) is where it is.
+        n.title = if modules[mi].lang == Lang::Ruby { name.rsplit("::").next().unwrap_or(&name).to_string() } else { name.clone() };
         let mut sub: Vec<String> = project_bases.clone();
         if let Some(e) = &ext_base {
             sub.push(e.clone());
@@ -4834,6 +4842,11 @@ fn build_class<'p>(cx: &mut Ctx<'p>, cid: usize, outer: Set<String>, types: &Typ
         n.span = Some(span);
         for d in &def.decorators {
             n.badges.extend(super::frameworks::tag(d, modules[mi].lang, |e| Namer::plain(src).code(e, 20)));
+        }
+        // A Rails concern says so where a trait would.
+        if let Some(i) = n.badges.iter().position(|b| b == "concern") {
+            n.badges.remove(i);
+            n.subtitle = if n.subtitle.is_empty() { "concern".into() } else { format!("concern: {}", n.subtitle) };
         }
         // ORM models are the database's tables: SQLModel `table=True`,
         // Django `models.Model`, SQLAlchemy declarative bases.

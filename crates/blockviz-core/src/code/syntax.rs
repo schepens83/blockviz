@@ -1,7 +1,8 @@
 //! A syntax tree shared by every language front end.
 //!
-//! Front ends (Python via Ruff, JavaScript/TypeScript via oxc, Rust via syn) lower their own
-//! trees into this one, and everything downstream (the symbol index, the flow
+//! Front ends (Python via Ruff, JavaScript/TypeScript via oxc, Rust via syn, Go
+//! through a port of go/parser, Ruby via Prism) lower their own trees into this
+//! one, and everything downstream (the symbol index, the flow
 //! builder, naming) reads only this. It keeps what diagrams need: statements,
 //! expressions, definitions and imports, with byte ranges into the original
 //! source so titles and the inspector show the code as written. Constructs a
@@ -17,6 +18,7 @@ pub enum Lang {
     TypeScript,
     Rust,
     Go,
+    Ruby,
 }
 
 impl Lang {
@@ -30,12 +32,13 @@ impl Lang {
             Lang::TypeScript => "TypeScript",
             Lang::Rust => "Rust",
             Lang::Go => "Go",
+            Lang::Ruby => "Ruby",
         }
     }
     /// Classes declare their fields in their body (`users = new Map()`,
     /// `struct S { users: Users }`) rather than only assigning them in methods.
     pub fn declares_fields(self) -> bool {
-        self != Lang::Python
+        !matches!(self, Lang::Python | Lang::Ruby)
     }
     /// Front ends resolve imports to files themselves (JavaScript specifiers,
     /// Rust module paths), and modules re-export names wholesale (`export *`,
@@ -48,7 +51,7 @@ impl Lang {
     /// variable of the code around the function (`let` and `:=` declare,
     /// but the shared tree does not keep them apart from assignments).
     pub fn assignment_declares(self) -> bool {
-        self == Lang::Python
+        matches!(self, Lang::Python | Lang::Ruby)
     }
     /// The compiler rejects a local that is never used (Go) or warns of
     /// one, and of a value assigned and never read (Rust). A value that

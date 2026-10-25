@@ -587,8 +587,9 @@ pub fn tag(d: &ast::Decorator, lang: ast::Lang, text: impl Fn(&Expr) -> String) 
     if lang == ast::Lang::Rust {
         return rust_tag(d, func);
     }
-    // Go has no decorators: the front end names what it found (`test`, `serializable`).
-    if lang == ast::Lang::Go {
+    // Go and Ruby have no decorators: the front end names what it found
+    // (`test`, `serializable`; `DB table`, `concern`).
+    if matches!(lang, ast::Lang::Go | ast::Lang::Ruby) {
         return match &d.expression {
             Expr::Call(c) if dotted(func).as_deref() == Some("badge") => c.arguments.args.first().and_then(string_literal).map(str::to_string),
             _ => None,

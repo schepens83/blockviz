@@ -88,6 +88,17 @@ fn go_io(path: &str) -> Option<Io> {
     })
 }
 
+/// Ruby's file classes and HTTP clients: `File.read`, `Net::HTTP.get`, `Faraday.post`.
+fn ruby_io(path: &str) -> Option<Io> {
+    let (owner, f) = path.rsplit_once('.')?;
+    Some(match (owner, f) {
+        ("File" | "IO", "read" | "readlines" | "foreach" | "binread" | "open" | "new") | ("Dir", "glob" | "entries" | "children" | "each_child" | "[]") | ("YAML" | "Psych", "load_file" | "safe_load_file") | ("CSV", "read" | "foreach" | "parse") => Io::Read,
+        ("File" | "IO", "write" | "binwrite" | "delete" | "unlink" | "rename" | "symlink" | "chmod") | ("FileUtils", _) | ("Dir", "mkdir" | "rmdir" | "delete") => Io::Write,
+        ("Net.HTTP", _) | ("URI", "open") | ("HTTParty" | "Faraday" | "RestClient" | "HTTP" | "Excon" | "Typhoeus", _) | ("TCPSocket" | "UDPSocket" | "Socket", _) => Io::Network,
+        _ => return None,
+    })
+}
+
 /// File or network I/O performed by an external function, by dotted path.
 pub fn io_of(path: &str, c: &ast::ExprCall, src: &Source) -> Option<(String, Io)> {
     let last = path.rsplit('.').next().unwrap_or(path);
@@ -97,6 +108,7 @@ pub fn io_of(path: &str, c: &ast::ExprCall, src: &Source) -> Option<(String, Io)
         ast::Lang::JavaScript | ast::Lang::TypeScript => js_io(root.strip_prefix("node:").unwrap_or(root), last),
         ast::Lang::Rust => rust_io(path),
         ast::Lang::Go => go_io(path),
+        ast::Lang::Ruby => ruby_io(path),
         ast::Lang::Python => None,
     };
     let io = io.or_else(|| match path {

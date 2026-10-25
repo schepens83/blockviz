@@ -274,6 +274,9 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
         crate::go::Resolver::new(&listing)
     };
     let mut go_inputs = vec![];
+    let mut rb_inputs = vec![];
+    // Ruby's `require` finds project files by path.
+    let all_paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
     for (i, f) in files.into_iter().enumerate() {
         let (class, language) = outline::classify(&f.path);
         let text = f.text.filter(|t| t.len() <= MAX_TEXT && !t.contains('\0'));
@@ -295,6 +298,7 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
             (Class::Code, Some(t)) if crate::js::lang_of(&f.path).is_some() && !minified => js_inputs.push(crate::js::JsInput { file: i as u32, path: f.path.clone(), text: t }),
             (Class::Code, Some(t)) if f.path.ends_with(".rs") => rs_inputs.push(crate::rust::RsInput { file: i as u32, path: f.path.clone(), text: t }),
             (Class::Code, Some(t)) if f.path.ends_with(".go") && !crate::go::resolve::ignored(&f.path) => go_inputs.push(crate::go::GoInput { file: i as u32, path: f.path.clone(), text: t }),
+            (_, Some(t)) if crate::ruby::is_ruby(&f.path, &t) => rb_inputs.push(crate::ruby::RbInput { file: i as u32, path: f.path.clone(), text: t }),
             (Class::Notebook, Some(t)) => {
                 match crate::notebook::to_python(&t) {
                     Some(py) => {
@@ -344,6 +348,12 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
     modules.extend(go_modules);
     headers.extend(go_headers);
     failed.extend(go_failed);
+    let paths: Vec<&str> = all_paths.iter().map(String::as_str).collect();
+    let (rb_modules, rb_headers, rb_failed) = crate::ruby::front_end(&mut b, rb_inputs, &paths, &mut diagnostics);
+    crate::timing::stage("parse Ruby");
+    modules.extend(rb_modules);
+    headers.extend(rb_headers);
+    failed.extend(rb_failed);
     let (b2, py) = code::analyze(b, modules, headers, failed);
     let mut b = b2;
     let mut py_by_file: Map<u32, &code::CodeFile> = Map::default();
@@ -467,14 +477,21 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
         let js = pf.lang.is_js();
         // Tool configuration in code: `vite.config.ts`, `.eslintrc.js`, `jest.config.js`.
         let tool_config = js && (base.contains(".config.") || base.starts_with(".eslintrc") || base.starts_with(".prettierrc") || base.starts_with("babel.config") || base == "gulpfile.js" || base == "Gruntfile.js");
-        let file_role = if js { framework_file_role(path) } else { None };
+        let ruby = pf.lang == code::syntax::Lang::Ruby;
+        let file_role = if js {
+            framework_file_role(path)
+        } else if ruby {
+            crate::ruby::rails::file_role(path).map(str::to_string)
+        } else {
+            None
+        };
         // A Rust file's role is its crate's: a binary or example runs, a
         // library root is the library, `build.rs` builds.
         let krate = (pf.lang == code::syntax::Lang::Rust).then(|| rs_resolver.module(path)).flatten().map(|(c, _)| c.clone());
         let rust_root = krate.as_ref().filter(|c| c.root == path).map(|c| c.kind);
         use crate::rust::resolve::CrateKind;
         let go_main = entries[pf.file as usize].program;
-        let runs = runs || matches!(rust_root, Some(CrateKind::Bin | CrateKind::Example)) || go_main && !test;
+        let runs = runs || matches!(rust_root, Some(CrateKind::Bin | CrateKind::Example)) || go_main && !test || ruby && file_role.as_deref() == Some("executable");
         let file_role = file_role.or_else(|| {
             Some(match rust_root? {
                 CrateKind::Lib => "library",
@@ -1146,6 +1163,10 @@ fn go_program(text: &str) -> bool {
 fn is_generated(path: &str, text: &str) -> bool {
     let base = path.rsplit('/').next().unwrap_or(path);
     if base.ends_with("_pb2.py") || base.ends_with("_pb2_grpc.py") || base.ends_with("_pb2.pyi") || base.ends_with(".pb.go") || base.contains(".gen.") || base.ends_with(".g.dart") || base.ends_with(".generated.ts") {
+        return true;
+    }
+    // Rails migrations (`db/schema.rb` says it is generated).
+    if path.contains("db/migrate/") && base.ends_with(".rb") {
         return true;
     }
     let mut in_doc = false;
