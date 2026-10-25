@@ -1,0 +1,43 @@
+module MissionControl::Jobs::JobFilters
+  extend ActiveSupport::Concern
+
+  included do
+    before_action :set_filters
+
+    helper_method :active_filters?, :jobs_filter_param
+  end
+
+  private
+    def set_filters
+      @job_filters = {
+        job_class_name: params.dig(:filter, :job_class_name).to_s.strip.presence,
+        queue_name: params.dig(:filter, :queue_name).to_s.strip.presence,
+        finished_at: date_range_params(:finished_at),
+        scheduled_at: date_range_params(:scheduled_at),
+        enqueued_at: date_range_params(:enqueued_at)
+      }.compact
+    end
+
+    def active_filters?
+      @job_filters.any?
+    end
+
+    def jobs_filter_param
+      if @job_filters&.any?
+        { filter: @job_filters }
+      else
+        {}
+      end
+    end
+
+    def date_range_params(attribute)
+      range_start, range_end = params.dig(:filter, :"#{attribute}_start"), params.dig(:filter, :"#{attribute}_end")
+      if range_start || range_end
+        (parse_with_time_zone(range_start)..parse_with_time_zone(range_end))
+      end
+    end
+
+    def parse_with_time_zone(date)
+      Time.zone.parse(date) if date.present?
+    end
+end

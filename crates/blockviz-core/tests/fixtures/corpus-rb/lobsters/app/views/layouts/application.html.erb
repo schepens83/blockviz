@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en" >
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <link rel="icon" sizes="144x144" type="image/png" href="/touch-icon-144.png">
+  <link rel="apple-touch-icon" sizes="57x57" href="/touch-icon.png">
+  <link rel="apple-touch-icon" sizes="114x114" href="/touch-icon.png">
+  <link rel="apple-touch-icon" sizes="72x72" href="/touch-icon-144.png">
+  <link rel="apple-touch-icon" sizes="144x144" href="/touch-icon-144.png">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="search" type="application/opensearchdescription+xml" href="/opensearch.xml" title="Lobsters">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="always">
+  <meta name="theme-color" content="#AC130D">
+  <meta name="story-flags" content="<%=  Vote::STORY_REASONS.to_json %>">
+  <meta name="comment-flags" content="<%=  Vote::COMMENT_REASONS.to_json %>">
+
+  <% (@meta_tags || []).each do |tag| %>
+    <meta property="<%= tag[:property] %>" content="<%= tag[:content] %>">
+  <% end %>
+  <link rel="shortcut icon" href="/favicon.ico">
+  <% if controller_name == "stories" && action_name == "show" %>
+    <%= tag :link, href: Routes.title_url(@story), rev: :canonical, rel: "self alternate shorter shorturl shortlink" %>
+  <% end %>
+  <title><%= @title.present? ? "#{@title} | " : "" %><%=
+    Rails.application.name %></title>
+
+  <%# static URLs for visitors so cached pages have css + js %>
+  <% if Rails.env.production? && !@user %>
+    <%= stylesheet_link_tag "/application.css" %>
+    <%= stylesheet_link_tag "/system-system.css" %>
+    <%# not importmap_tags: https://lobste.rs/c/ir3nou %>
+    <%= javascript_include_tag "/application.js", type: "module" %>
+  <% else %>
+    <%= stylesheet_link_tag "application" %>
+    <%= stylesheet_link_tag (@user&.prefers_color_scheme || "system") + "-" + (@user&.prefers_contrast || "system") %>
+    <%= javascript_importmap_tags "user" %>
+  <% end %>
+  <% if @user %>
+    <%= stylesheet_link_tag "tom-select", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag "TomSelect_remove_button", "data-turbo-track": "reload" %>
+  <% end %>
+
+  <%= csrf_meta_tags %>
+  <% if @rss_link %>
+    <link rel="alternate" type="application/rss+xml"
+      title="<%= @rss_link[:title] %>" href="<%= @rss_link[:href] %>">
+  <% end %>
+  <% if @comments_rss_link %>
+    <link rel="alternate" type="application/rss+xml"
+      title="<%= @comments_rss_link[:title] %>"
+      href="<%= @comments_rss_link[:href] %>">
+  <% end %>
+  <meta name="robots" content="noai, noimageai">
+<% # only for logged-out users so we don't speculatively advance ReadRibbons %>
+  <% if !@user %>
+    <script type="speculationrules" nonce="<%= content_security_policy_nonce %>">
+      {
+        "prefetch": [
+          {
+            "where": {
+              "href_matches": "/*"
+            },
+            "eagerness": "moderate"
+          }
+        ]
+      }
+    </script>
+  <% end %>
+</head>
+<body data-username='<%= @user.try(:username) %>'>
+  <header id="header">
+    <div id="header-top">
+      <h1 style="<%= @traffic_style %>" id="logo">
+        <a href="/" title="<%= Rails.application.name %> (Current traffic: <%= @traffic_intensity.to_i %>%)">
+          <b class="sr-only" aria-hidden="true"><%= Rails.application.name %></b>
+        </a>
+        <%= @traffic_novelty %>
+      </h1>
+
+      <nav aria-label="Menu">
+        <ul>
+          <li><%= link_to_different_page 'Active', active_path %></li>
+          <li><%= link_to_different_page 'Recent', recent_path %></li>
+          <li><%= link_to_different_page 'Comments', comments_path %></li>
+
+          <% if @user && @user.can_submit_stories? %>
+            <li><%= link_to_different_page 'Submit', new_story_path %></li>
+          <% end %>
+
+          <li><%= link_to_different_page 'Search', search_path %></li>
+
+
+          <% if @user %>
+            <li class="push-right inbox">
+              <%= link_to inbox_path do %>
+                <b>Inbox</b> <b aria-hidden="true">✉</b> <% if @user.inbox_count > 0 %>&nbsp;<b class="inbox-unread"><%= @user.inbox_count %></b><% end %>
+              <% end %>
+            </li>
+
+            <li><%= link_to_different_page 'Threads', threads_path %></li>
+            <li><%= link_to_different_page 'Saved', saved_path %></li>
+            <li><%= link_to_different_page raw("#{@user.username}&nbsp;<span class='karma' aria-label='(karma: #{@user.karma})'>(#{@user.karma})</span>"), settings_path %></li>
+          <% else %>
+            <li class="push-right"><%= link_to_different_page 'Login', login_path %></li>
+          <% end %>
+        </ul>
+      </nav>
+    </div>
+
+    <% if content_for? :subnav %>
+      <nav id="subnav" aria-label="Subnavigation">
+        <ul>
+          <%= yield :subnav %>
+        </ul>
+      </nav>
+    <% end %>
+
+  </header>
+
+  <main id="inside">
+    <% if @title.present? && @title_h1 %>
+      <h1 class="<%= @title_class %>"><%= @title %></h1>
+    <% end %>
+
+    <% [ :error, :success, :notice ].each do |f| %>
+      <% if flash[f].present? %>
+        <div class="flash-<%= f %>"><%= flash[f] %></div>
+      <% end %>
+    <% end %>
+
+    <%= yield %>
+  </main>
+
+  <footer>
+    <span id="office-hours-live">
+      <% if File.exist?('tmp/office_hours_live.txt') && File.mtime('tmp/office_hours_live.txt').after?(1.minute.ago) %>
+        The <a href="https://lobste.rs/s/zzprkr/weekly_lobsters_office_hours">office hours stream</a> is <a href="https://www.twitch.tv/pushcx">currently live ⏵</a>
+      <% end %>
+    </span>
+
+    <nav>
+      <%= link_to 'About', about_path %>
+      <% if !@user && Rails.application.open_signups? %>
+        <a href="/invitations/open">Join <%= Rails.application.name %></a>
+      <% end %>
+      <% if @user && @user.can_see_invitation_requests? &&
+            (iqc = InvitationRequest.verified_count) > 0 %>
+        <a href="/invitations">Invitation Queue (<%= iqc %>)</a>
+      <% end %>
+      <%= link_to 'Tags', tags_path %>
+      <% if @user && @user.is_moderator? && (hrc = HatRequest.count) > 0 %>
+        <%= link_to "#{hrc} Hat Requests", hat_requests_path, class: 'mod' %>
+      <% end %>
+      <%= link_to 'Filter', filters_path %>
+      <%= link_to 'Moderation Log', moderations_path %>
+    </nav>
+  </footer>
+
+  <span id="iab-pcm-sdk"></span><span id="iab-autofill-sdk"></span>
+</body>
+</html>
