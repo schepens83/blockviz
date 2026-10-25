@@ -56,7 +56,7 @@ export function OpenDialog({ onOpen, onClose, canClose, lastUrl }: { onOpen: (r:
         {paste && (
           <div className="paste">
             <input value={filename} onChange={e => { setFilename(e.target.value); setNamed(true); }} aria-label="Filename" spellCheck={false} />
-            <textarea value={text} onChange={e => { setText(e.target.value); if (!named) setFilename(guessFilename(e.target.value)); }} placeholder="Paste Python, JavaScript, TypeScript, Rust or Go here…" spellCheck={false} aria-label="Code" />
+            <textarea value={text} onChange={e => { setText(e.target.value); if (!named) setFilename(guessFilename(e.target.value)); }} placeholder="Paste Python, JavaScript, TypeScript, Rust, Go or Ruby here…" spellCheck={false} aria-label="Code" />
             <button className="primary" disabled={!text.trim()} onClick={() => onOpen({ kind: 'paste', filename, text })}>Visualize</button>
           </div>
         )}

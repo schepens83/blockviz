@@ -22,6 +22,8 @@ describe('pasted code', () => {
     expect(guessFilename('func (s *Server) Run(ctx context.Context) error {\n\treturn nil\n}\n')).toBe('main.go');
     expect(guessFilename('import "./styles.css"\nexport const x = 1;\n')).toBe('main.js');
     expect(guessFilename('impl Display for Frame {\n    fn fmt(&self, f: &mut Formatter) -> fmt::Result { Ok(()) }\n}\n')).toBe('lib.rs');
+    expect(guessFilename('class StoriesController < ApplicationController\n  def show\n    @story = Story.find(params[:id])\n  end\nend\n')).toBe('main.rb');
+    expect(guessFilename('require "json"\n\nmodule Shop\n  def self.total(items) = items.sum(&:price)\nend\n')).toBe('main.rb');
   });
 
   it('names the project after the file', () => {

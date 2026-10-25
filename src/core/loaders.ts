@@ -473,6 +473,9 @@ export function guessFilename(text: string): string {
   // Rust: items with Rust's keywords (`fn`, `impl`, `use x::y`, `pub struct`, `let mut`).
   const rust = /^\s*(pub(\([\w:]+\))?\s+)?(async\s+)?(fn\s+\w+\s*[<(]|impl(<[^>]*>)?\s+\w|mod\s+\w+\s*[;{]|use\s+[\w:{}*, ]+::|(struct|enum|trait)\s+\w+)|\blet\s+mut\s|#\[derive\(|^\s*#!\[/m.test(text);
   if (rust) return /^\s*(pub\s+)?(async\s+)?fn\s+main\s*\(/m.test(text) ? 'main.rs' : 'lib.rs';
+  // Ruby: blocks closed by `end`, `def` lines without Python's colon, `class X < Y`, `module X`, `require "x"`.
+  const ruby = /^\s*end\s*$/m.test(text) && /^\s*(def\s+[\w.?!=]+(\([^)]*\))?\s*(#.*)?$|class\s+[A-Z][\w:]*(\s*<\s*[\w:.]+)?\s*$|module\s+[A-Z][\w:]*\s*$|require(_relative)?\s+['"]|attr_(accessor|reader|writer)\s)/m.test(text);
+  if (ruby) return 'main.rb';
   const python = /^\s*(def \w+\(|class \w+(\(.*\))?:\s*$|from [\w.]+ import |import [\w.]+(\s+as \w+)?\s*$|if __name__ ==)/m.test(text);
   const js = /^\s*(import\s[^\n]*from\s*['"]|import\s+['"]|export\s|const\s|let\s|var\s|function\*?\s|module\.exports|(async\s+)?function\s)|=>|\brequire\(['"]/m.test(text);
   if (!js || (python && !/[;{}]\s*$/m.test(text))) return 'main.py';
