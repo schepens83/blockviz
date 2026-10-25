@@ -152,6 +152,8 @@ pub struct Viewer {
     pub changes_open: bool,
     /// The change unfolded in the changes list and outlined in the diagram, as its index among the changes.
     pub marked: Option<usize>,
+    /// Where the pointer to an off-screen marked block is drawn this frame, and the block.
+    pub(crate) marker: Option<(crate::camera::Rect, u32)>,
     /// The project on screen is a snapshot (the index, a revision) with this name, not a folder followed as it changes.
     pub snapshot: Option<String>,
     /// A comparison to start once the folder being opened has been analyzed.
@@ -230,6 +232,7 @@ impl Viewer {
             removed_sel: None,
             changes_open: true,
             marked: None,
+            marker: None,
             snapshot: None,
             pending: None,
             scoped: !settings_unscoped,
@@ -904,6 +907,29 @@ impl Viewer {
         self.compare.is_some() && self.changes_open && self.selected.is_none() && self.removed_sel.is_none() && self.value.is_none()
     }
 
+    /// Over the diagram, where the change unfolded in the list is: kept up for as long as it is unfolded.
+    fn draw_located(&mut self, m: &Rc<Model>, width: f64, height: f64, window: &mut Window, cx: &mut Context<Self>, origin: (f64, f64)) {
+        self.marker = None;
+        if !self.panel_shows_changes() {
+            return;
+        }
+        let (Some(target), Some(change)) = (self.marked_block(), self.compare.as_ref().and_then(|c| c.diff.changes.get(self.marked?).copied())) else { return };
+        let mut ancestors = vec![];
+        let mut up = m.node(target).parent;
+        while let Some(a) = up {
+            ancestors.push(a);
+            up = m.node(a).parent;
+        }
+        let view = crate::locate::view_rect(width, height, self.insets());
+        let at = self.camera.screen_box(m, &m.canonical_path(target));
+        let Some(located) = crate::locate::locate(target, &ancestors, &self.hits, at, view) else { return };
+        let label = crate::diff::block_name(m, m.node(target));
+        let mut pen = GpuiPen::new(window, cx, origin);
+        if let Some(area) = crate::locate::draw(&mut pen, &self.theme, located, change.status, &label, view) {
+            self.marker = Some((area, target));
+        }
+    }
+
     /// The block in the diagram a marked change is: itself, or for a removed one the block it was in.
     fn marked_block(&self) -> Option<u32> {
         let c = self.compare.as_ref()?.diff.changes.get(self.marked?)?;
@@ -1096,6 +1122,13 @@ impl Viewer {
         self.menu = None;
         if self.m.is_none() {
             return;
+        }
+        // The pointer to a marked block that is out of view takes you there.
+        let (px_, py_) = self.local(e.position);
+        if let Some((area, id)) = self.marker.filter(|(a, _)| a.contains(px_, py_)) {
+            let _ = area;
+            self.press = None;
+            return self.reveal_node(id, cx);
         }
         self.flight = None;
         if e.click_count == 2 {
@@ -1481,6 +1514,7 @@ impl Viewer {
         };
         self.hits = drew.hits;
         self.edge_hits = drew.edge_hits;
+        self.draw_located(&m, width, height, window, cx, origin);
         // The breadcrumbs follow the view; they are drawn again only when it is somewhere else.
         let focus = self.camera.focus(&m, width, height);
         if focus != self.crumbs {

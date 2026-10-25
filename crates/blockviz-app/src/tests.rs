@@ -257,6 +257,19 @@ fn a_comparison_lists_the_changes_and_steps_through_them(cx: &mut TestAppContext
     frame(cx);
     assert_eq!(view.read_with(cx, |v, _| v.marked), Some(0));
     assert_eq!(content(&view, cx), Content::Changes);
+    // Its block stays pointed out: with the view moved far away, a marker on the edge leads back to it.
+    assert!(view.read_with(cx, |v, _| v.marker.is_none()));
+    view.update(cx, |v, cx| {
+        v.pan_by(-40000.0, 0.0, cx);
+    });
+    frame(cx);
+    let (area, _) = view.read_with(cx, |v, _| v.marker).expect("a marker for the block out of view");
+    let before = view.read_with(cx, |v, _| v.camera.xf);
+    cx.simulate_click(point(px((area.x + area.w / 2.0) as f32), px((area.y + area.h / 2.0) as f32)), Modifiers::none());
+    land(&view, cx);
+    let after = view.read_with(cx, |v, _| v.camera.xf);
+    assert_ne!((before.x, before.y), (after.x, after.y));
+    assert!((before.s - after.s).abs() < 1e-9);
     // Zooming to a change (a double click) reads it in the panel.
     view.update(cx, |v, cx| v.go_to_change(0, cx));
     frame(cx);

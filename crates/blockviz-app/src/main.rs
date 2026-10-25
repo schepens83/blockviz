@@ -22,6 +22,7 @@ mod input;
 mod linediff;
 mod lines;
 mod live;
+mod locate;
 mod menus;
 mod model;
 mod panel;
