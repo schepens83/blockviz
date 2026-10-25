@@ -306,8 +306,17 @@ export default function App() {
   useEffect(() => {
     const model = loaded?.model;
     if (!listing || !markedChange || markedBlock === null || !model) return engine.current?.setLocated(null);
-    engine.current?.setLocated(markedBlock, markedChange.status, blockName(model, model.node(markedBlock)));
-  }, [listing, markedChange, markedBlock, loaded]);
+    engine.current?.setLocated({ key: marked, id: markedBlock, status: markedChange.status, label: blockName(model, model.node(markedBlock)) });
+  }, [listing, markedChange, markedBlock, marked, loaded]);
+  // The row under the pointer is pointed out too, calmly.
+  const [hoveredChange, setHoveredChange] = useState(-1);
+  useEffect(() => {
+    const c = loaded?.compare?.diff.changes[hoveredChange];
+    const model = loaded?.model;
+    if (!listing || !c || !model) return engine.current?.setHovered(null);
+    const id = c.status === 'removed' ? c.at : c.id;
+    engine.current?.setHovered({ key: hoveredChange, id, status: c.status, label: blockName(model, model.node(id)) });
+  }, [listing, hoveredChange, loaded]);
 
   // A block pointed out from the details panel stops being pointed out when the panel shows something else.
   useEffect(() => engine.current?.peek(null), [selected, value, removedSel, changesOpen]);
@@ -638,7 +647,7 @@ export default function App() {
           onGo={goToChange}
           onMark={setMarked}
           onScoped={on => { setScoped(on); storage.set('blockviz.scoped', on ? '1' : '0'); }}
-          onPeek={id => engine.current?.peek(id)}
+          onHover={setHoveredChange}
         />
       )}
 

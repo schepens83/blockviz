@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SceneNode } from '../core/types';
-import { childXf, edgeMarker, frame, frameAround, frameReadable, locate, markerArea, NO_INSETS, panToReveal, parentXf, scrimRects, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
+import { childXf, drawPlan, edgeMarker, frame, frameAround, frameReadable, locate, markerArea, NO_INSETS, panToReveal, parentXf, scrimRects, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
 
 const box = (over: Partial<SceneNode> = {}): SceneNode => ({
   id: 1, kind: 'function', shape: 'box', category: 'function', title: 'f',
@@ -261,5 +261,15 @@ describe('the spotlight scrim', () => {
 
   it('cuts a hole that hangs out of the view to it', () => {
     expect(area(scrimRects(view, { x: -50, y: 50, w: 100, h: 100 }))).toBe(800 * 500 - 50 * 100);
+  });
+});
+
+describe('what to draw for the unfolded change and the hovered one', () => {
+  it('draws a change once, in the louder style, and the hovered one on top', () => {
+    expect(drawPlan(null, null)).toEqual([]);
+    expect(drawPlan(2, null)).toEqual([{ key: 2, style: 'located' }]);
+    expect(drawPlan(null, 5)).toEqual([{ key: 5, style: 'hover' }]);
+    expect(drawPlan(2, 2)).toEqual([{ key: 2, style: 'located' }]);
+    expect(drawPlan(2, 5)).toEqual([{ key: 2, style: 'located' }, { key: 5, style: 'hover' }]);
   });
 });

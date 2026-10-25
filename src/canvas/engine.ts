@@ -1,5 +1,5 @@
 import { Camera, type CameraState, type Framing, type Plan } from './camera';
-import { clamp, edgeMarker, locate, markerArea, panToReveal, scrimRects, viewBox, type Box, type Insets, type Xf } from './geometry';
+import { clamp, drawPlan, edgeMarker, locate, markerArea, panToReveal, scrimRects, viewBox, type Box, type Insets, type Xf } from './geometry';
 import type { SceneDiff, Status } from './diff';
 import type { SceneModel } from './model';
 import { Renderer, type EdgeHit, type Paint, type Trace } from './renderer';
@@ -25,10 +25,15 @@ const LOOK = {
   glowMin: 0.15,
   glowMax: 0.4,
   breathSeconds: 1.6,
+  /** Pointing at a change by hovering its row: the glow stays at this strength, and nothing is dimmed. */
+  hoverGlow: 0.3,
   /** The edge marker, against its first size. */
   markerScale: 1.4,
   markerText: '#fafafa',
 };
+
+/** A change's block to point out: which change (`key`), its block, how it changed and its name. */
+export interface Pointed { key: number; id: number; status: Status; label: string }
 
 /** An edge, as its container and its index among the container's edges. */
 export interface EdgeRef { owner: number; index: number }
@@ -73,7 +78,9 @@ export class Engine {
   /** How the code on screen differs from a base version (a pull request), when it is one. */
   private diff: SceneDiff | null = null;
   /** The block of the change unfolded in the list, and how it changed: kept pointed out. */
-  private located: { id: number; status: Status; label: string } | null = null;
+  private located: Pointed | null = null;
+  /** The change row under the pointer, pointed out calmly. */
+  private hovered: Pointed | null = null;
   /** Where the pointer to it, out of view, is drawn this frame. */
   private marker: Box | null = null;
   private flight: { start: number; duration: number; step: (t: number) => void } | null = null;
@@ -150,8 +157,14 @@ export class Engine {
   }
 
   /** Keeps a block pointed out, in the color of how it changed, wherever it is (null: stop). */
-  setLocated(id: number | null, status: Status = 'changed', label = '') {
-    this.located = id === null ? null : { id, status, label };
+  setLocated(p: Pointed | null) {
+    this.located = p;
+    this.invalidate();
+  }
+
+  /** Points a block out calmly, for the row under the pointer (null: stop). */
+  setHovered(p: Pointed | null) {
+    this.hovered = p;
     this.invalidate();
   }
 
@@ -427,11 +440,15 @@ export class Engine {
     return { x: x + b.x * s, y: y + b.y * s, w: b.w * s, h: b.h * s };
   }
 
-  /** Over the diagram: the block itself, the block it is in, or an arrow on the edge of the view leading to it. */
+  /** Over the diagram: the change unfolded and the one hovered, each as the block itself, the block it is in, or an arrow on the edge of the view leading to it. */
   private drawLocated() {
     this.marker = null;
-    const l = this.located;
-    if (!l) return;
+    const by = new Map<number, Pointed>();
+    for (const p of [this.located, this.hovered]) if (p) by.set(p.key, p);
+    for (const { key, style } of drawPlan(this.located?.key ?? null, this.hovered?.key ?? null)) this.drawPointed(by.get(key)!, style);
+  }
+
+  private drawPointed(l: Pointed, style: 'located' | 'hover') {
     const ancestors: number[] = [];
     for (let p = this.model.node(l.id).parent; p !== undefined; p = this.model.node(p).parent) ancestors.push(p);
     const view = viewBox(this.width, this.height, this.camera.insets);
@@ -444,11 +461,13 @@ export class Engine {
     if (found.kind !== 'away') {
       const within = found.kind === 'within';
       const { x, y, w, h } = found.box;
-      // The spotlight: the rest of the view dimmed.
-      ctx.fillStyle = '#000';
-      ctx.globalAlpha = within ? LOOK.scrimWithin : theme === DARK ? LOOK.scrimDark : LOOK.scrimLight;
-      const pad = LOOK.holePad;
-      for (const b of scrimRects(view, { x: x - pad, y: y - pad, w: w + 2 * pad, h: h + 2 * pad })) if (b.w > 0 && b.h > 0) ctx.fillRect(b.x, b.y, b.w, b.h);
+      // The spotlight: the rest of the view dimmed (not for a hovered row).
+      if (style === 'located') {
+        ctx.fillStyle = '#000';
+        ctx.globalAlpha = within ? LOOK.scrimWithin : theme === DARK ? LOOK.scrimDark : LOOK.scrimLight;
+        const pad = LOOK.holePad;
+        for (const b of scrimRects(view, { x: x - pad, y: y - pad, w: w + 2 * pad, h: h + 2 * pad })) if (b.w > 0 && b.h > 0) ctx.fillRect(b.x, b.y, b.w, b.h);
+      }
       // The glow breathes outside the ring.
       const o = LOOK.ringOffset;
       const ring = (grow: number, width: number, alpha: number, dashed: boolean) => {
@@ -463,9 +482,10 @@ export class Engine {
       };
       const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
       const wave = still ? 0.5 : 0.5 + 0.5 * Math.sin((2 * Math.PI * performance.now()) / 1000 / LOOK.breathSeconds);
-      ring(LOOK.ringWidth / 2 + LOOK.glowWidth / 2, LOOK.glowWidth, LOOK.glowMin + (LOOK.glowMax - LOOK.glowMin) * wave, false);
+      const glow = style === 'hover' ? LOOK.hoverGlow : LOOK.glowMin + (LOOK.glowMax - LOOK.glowMin) * wave;
+      ring(LOOK.ringWidth / 2 + LOOK.glowWidth / 2, LOOK.glowWidth, glow, false);
       ring(0, within ? LOOK.ringWidthWithin : LOOK.ringWidth, 1, within || l.status === 'removed');
-      if (!still) this.invalidate();
+      if (!still && style === 'located') this.invalidate();
     } else {
       const k = LOOK.markerScale;
       const m = edgeMarker(view, found.box, 16 * k);
@@ -473,7 +493,8 @@ export class Engine {
         ctx.font = `700 ${11.5 * k}px system-ui, sans-serif`;
         const text = l.label.length > 28 ? `${l.label.slice(0, 27)}…` : l.label;
         const area = markerArea(m, ctx.measureText(text).width + 10 * k, k);
-        this.marker = area;
+        // Only the unfolded change's arrow is clickable: the pointer of a hovered row is in the list.
+        if (style === 'located') this.marker = area;
         ctx.shadowColor = 'rgba(0,0,0,0.35)';
         ctx.shadowBlur = 8;
         ctx.shadowOffsetY = 2;

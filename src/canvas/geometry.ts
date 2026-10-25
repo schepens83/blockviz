@@ -303,3 +303,11 @@ export function scrimRects(view: Box, hole: Box): [Box, Box, Box, Box] {
     { x: x1, y: y0, w: view.x + view.w - x1, h: y1 - y0 },
   ];
 }
+
+/** What to draw, in order, for the change unfolded in the list (`marked`) and the one under the pointer (`hovered`), by key: a change once, in the louder style, the hovered one on top. */
+export function drawPlan(marked: number | null, hovered: number | null): { key: number; style: 'located' | 'hover' }[] {
+  const out: { key: number; style: 'located' | 'hover' }[] = [];
+  if (marked !== null) out.push({ key: marked, style: 'located' });
+  if (hovered !== null && hovered !== marked) out.push({ key: hovered, style: 'hover' });
+  return out;
+}

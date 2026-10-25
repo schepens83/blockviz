@@ -81,7 +81,7 @@ function ChangeCode({ diff, change, highlights, baseHighlights }: { diff: SceneD
  * changed without changing any block (binaries, whitespace, files not
  * analyzed) are listed after.
  */
-export function ChangesPanel({ diff, info, size, current, marked, visible, scope, scoped, highlights, baseHighlights, onResize, onClose, onGo, onMark, onScoped, onPeek }: {
+export function ChangesPanel({ diff, info, size, current, marked, visible, scope, scoped, highlights, baseHighlights, onResize, onClose, onGo, onMark, onScoped, onHover }: {
   diff: SceneDiff;
   info: CompareInfo;
   size: PanelSize;
@@ -103,7 +103,8 @@ export function ChangesPanel({ diff, info, size, current, marked, visible, scope
   /** Marks a change (-1: none). */
   onMark: (index: number) => void;
   onScoped: (scoped: boolean) => void;
-  onPeek: (id: number | null) => void;
+  /** The change under the pointer (-1: none). */
+  onHover: (index: number) => void;
 }) {
   const touch = useMedia(TOUCH);
   const list = useRef<HTMLDivElement>(null);
@@ -164,7 +165,7 @@ export function ChangesPanel({ diff, info, size, current, marked, visible, scope
         {groups.map(g => (
           <div className="insp-field" key={g.file}>
             <label className="change-file">{g.mark && <span className={`file-mark ${g.mark}`}>{g.mark}</span>}{g.file || 'Repository'}</label>
-            <div className="uses changes" onMouseLeave={() => onPeek(null)}>
+            <div className="uses changes" onMouseLeave={() => onHover(-1)}>
               {g.items.map(({ c, i, d }) => (
                 <div className="change-item" key={i}>
                   <div className="change-row">
@@ -175,7 +176,7 @@ export function ChangesPanel({ diff, info, size, current, marked, visible, scope
                       // The first click of a double click only marks; the second does not undo it.
                       onClick={e => { if (e.detail < 2) onMark(i === marked ? -1 : i); }}
                       onDoubleClick={() => { onMark(i); onGo(i); }}
-                      onMouseEnter={() => onPeek(c.at)}
+                      onMouseEnter={() => onHover(i)}
                     >
                       <span className="use-name"><span className={`change-mark ${c.status}`}>{MARK[c.status]}</span>{d.context && <span className="dim">{d.context} › </span>}{d.name}<span className="dim"> · {d.kind.toLowerCase()}</span></span>
                       {d.line !== undefined && <span className="use-at">{d.line}</span>}
