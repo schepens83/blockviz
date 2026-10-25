@@ -736,6 +736,7 @@ dependencies = [
  "oxc_syntax",
  "proc-macro2",
  "regex-lite",
+ "ruby-prism",
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",
@@ -5130,6 +5131,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "ruby-prism"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e292a6139b28657899a18778d281cd4829d5e46ccc060edc1d0cdcd6b1fae774"
+dependencies = [
+ "ruby-prism-sys",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ruby-prism-sys"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0080aa6a022c43438c9f33533e2da926407776e96583be67d7864c4037fb84b3"
+dependencies = [
+ "cc",
+ "shlex 2.0.1",
+]
+
+[[package]]
 name = "ruff_python_ast"
 version = "0.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7647,8 +7669,6 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 [[package]]
 name = "xattr"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d1526bbe5aaeb5eb06885f4d987bcdfa5e23187055de9b83fe00156a821fabc"
 dependencies = [
  "libc",
 ]

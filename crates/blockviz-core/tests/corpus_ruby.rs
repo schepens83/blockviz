@@ -222,6 +222,18 @@ fn lobsters_routes_name_their_actions() {
 }
 
 #[test]
+fn mission_control_rake_tasks() {
+    let s = repo("mission_control-jobs");
+    let tasks = file(&s, "lib/mission_control/jobs/tasks.rb");
+    assert_eq!(tasks.subtitle, "tasks");
+    let configure = def(&s, tasks, "mission_control:jobs:authentication:configure");
+    assert_eq!(configure.subtitle, "rake task");
+    assert!(configure.badges.contains(&"loads app".to_string()));
+    let auth = def(&s, file(&s, "lib/mission_control/jobs/authentication.rb"), "configure");
+    assert!(descendants(&s, configure).iter().any(|n| n.reference == Some(auth.id)));
+}
+
+#[test]
 fn mission_control_routes_are_the_engines() {
     let s = repo("mission_control-jobs");
     let action = |path: &str, class: &str, name: &str| def(&s, def(&s, file(&s, &format!("app/controllers/mission_control/jobs/{path}")), class), name).subtitle.clone();

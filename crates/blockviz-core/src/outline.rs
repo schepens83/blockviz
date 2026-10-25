@@ -65,6 +65,10 @@ pub fn classify(path: &str) -> (Class, &'static str) {
     if name == ".env" || name.starts_with(".env.") {
         return (Class::Config, "Env");
     }
+    // Ruby without the `.rb`: Rake, Bundler and other DSL files, Rack's `config.ru`, Builder views.
+    if matches!(name.as_str(), "rakefile" | "gemfile" | "thorfile" | "guardfile" | "capfile" | "vagrantfile" | "brewfile" | "steepfile") || matches!(ext, "rake" | "gemspec" | "ru" | "thor" | "builder" | "jbuilder" | "rabl") {
+        return (Class::Code, "Ruby");
+    }
     let r = match ext {
         "py" | "pyi" | "pyw" => (Class::Python, "Python"),
         "ipynb" => (Class::Notebook, "Notebook"),

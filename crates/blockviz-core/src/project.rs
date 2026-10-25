@@ -280,6 +280,7 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
     for (i, f) in files.into_iter().enumerate() {
         let (class, language) = outline::classify(&f.path);
         let text = f.text.filter(|t| t.len() <= MAX_TEXT && !t.contains('\0'));
+        let language = if text.as_deref().is_some_and(|t| crate::ruby::is_ruby(&f.path, t)) { "Ruby" } else { language };
         if text.is_none() && matches!(class, Class::Python | Class::Notebook | Class::Code | Class::Config) && f.bytes as usize > MAX_TEXT {
             diagnostics.push(format!("Skipped {} ({} KB is over the per-file limit).", f.path, f.bytes / 1024));
         }

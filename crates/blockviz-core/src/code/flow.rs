@@ -3161,7 +3161,8 @@ impl<'c, 'p> Fb<'c, 'p> {
             let namer = Namer::plain(src);
             // Rails: the callback or filter a method is (`before save`, `before every action`).
             if let (Lang::Ruby, Some(label)) = (self.m.lang, crate::ruby::rails::role(&d.expression)) {
-                role.get_or_insert(frameworks::Role { label: label.to_string(), kind: Handler::Hook });
+                let kind = if label == "rake task" { Handler::Task } else { Handler::Hook };
+                role.get_or_insert(frameworks::Role { label: label.to_string(), kind });
                 continue;
             }
             // and the views an action renders.
