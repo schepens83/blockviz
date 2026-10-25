@@ -18,7 +18,6 @@ mod gpuipen;
 mod history;
 mod hook;
 mod icons;
-mod ignores;
 mod input;
 mod linediff;
 mod lines;

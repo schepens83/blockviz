@@ -31,5 +31,9 @@ proc-macro2 = { version = "=1.0.107", default-features = false, features = ["spa
 # Ruby: Prism, Ruby's own parser (C, built from source; see wasm-libc/ for the browser).
 ruby-prism = "=2.0.0"
 
+# Reading .gitignore files (ripgrep's matcher) when a program reads a folder; the browser never does.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ignore = "0.4"
+
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-Os", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-mutable-globals", "--enable-reference-types"]

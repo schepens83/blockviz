@@ -8,6 +8,8 @@ pub mod code;
 pub mod compose;
 pub mod go;
 pub mod hash;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod ignores;
 #[cfg(target_arch = "wasm32")]
 mod headroom;
 pub mod highlight;

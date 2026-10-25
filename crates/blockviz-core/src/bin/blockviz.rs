@@ -5,7 +5,14 @@ use blockviz_core::ir::{Node, Scene};
 use std::io::Write;
 use std::path::Path;
 
-fn walk(dir: &Path, root: &Path, out: &mut Vec<blockviz_core::project::InFile>) {
+/// The files of a folder: all but what its `.gitignore` files and the list of folders never read leave out.
+fn read(root: &Path) -> Vec<blockviz_core::project::InFile> {
+    let mut files = vec![];
+    walk(root, root, &blockviz_core::ignores::Ignores::new(root), &mut files);
+    files
+}
+
+fn walk(dir: &Path, root: &Path, ignores: &blockviz_core::ignores::Ignores, out: &mut Vec<blockviz_core::project::InFile>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(|e| e.path());
@@ -13,10 +20,10 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<blockviz_core::project::InFile>) 
         let p = e.path();
         let rel = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
         if p.is_dir() {
-            if !blockviz_core::project::ignored(&format!("{rel}/x")) {
-                walk(&p, root, out);
+            if !blockviz_core::project::ignored(&format!("{rel}/x")) && !ignores.ignored(&rel, true) {
+                walk(&p, root, ignores, out);
             }
-        } else {
+        } else if !blockviz_core::project::ignored(&rel) && !ignores.ignored(&rel, false) {
             let bytes = e.metadata().map(|m| m.len()).unwrap_or(0);
             let text = if bytes < 2_000_000 { std::fs::read_to_string(&p).ok() } else { None };
             out.push(blockviz_core::project::InFile { path: rel, text, bytes });
@@ -81,9 +88,8 @@ fn main() {
     let dir = args.get(1).expect("usage: blockviz <dir> [--depth N] [--json] [--trunks] [--timings]");
     let depth = args.iter().position(|a| a == "--depth").and_then(|i| args.get(i + 1)).and_then(|d| d.parse().ok()).unwrap_or(4);
     let root = Path::new(dir);
-    let mut files = vec![];
     let reading = std::time::Instant::now();
-    walk(root, root, &mut files);
+    let files = read(root);
     let read = reading.elapsed();
     let name = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let start = std::time::Instant::now();
@@ -107,4 +113,33 @@ fn main() {
         println!("! {d}");
     }
     print(&scene, scene.root, 0, depth);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_a_folder_without_what_its_gitignore_leaves_out() {
+        let dir = std::env::temp_dir().join(format!("blockviz-cli-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let write = |path: &str, text: &str| {
+            let p = dir.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write(".gitignore", "*.log\ntmp/\n");
+        write("a.py", "x = 1\n");
+        write("debug.log", "noise");
+        write("tmp/scratch.py", "y = 1\n");
+        write("pkg/.gitignore", "gen.py\n");
+        write("pkg/gen.py", "z = 1\n");
+        write("pkg/real.py", "z = 2\n");
+        write("node_modules/dep/index.js", "");
+        write(".github/workflows/ci.yml", "on: push\n");
+        let mut paths: Vec<String> = read(&dir).into_iter().map(|f| f.path).collect();
+        paths.sort();
+        assert_eq!(paths, [".github/workflows/ci.yml", ".gitignore", "a.py", "pkg/.gitignore", "pkg/real.py"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

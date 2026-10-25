@@ -3,7 +3,7 @@
 //! several events, a checkout many) to settle, and analyzes the project again,
 //! reusing what the core parsed of every file that did not change.
 
-use crate::ignores::Ignores;
+use blockviz_core::ignores::Ignores;
 use crate::model::Model;
 use blockviz_core::project::{build_cached, ignored, Cache, InFile};
 use notify::{EventKind, RecursiveMode, Watcher};

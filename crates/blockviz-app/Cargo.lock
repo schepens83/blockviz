@@ -717,7 +717,6 @@ dependencies = [
  "blockviz-core",
  "futures",
  "gpui",
- "ignore",
  "lyon",
  "notify",
  "resvg",
@@ -730,6 +729,7 @@ dependencies = [
 name = "blockviz-core"
 version = "0.2.0"
 dependencies = [
+ "ignore",
  "oxc_allocator",
  "oxc_ast",
  "oxc_parser",
