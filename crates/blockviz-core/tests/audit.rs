@@ -1,5 +1,5 @@
 //! A report of the abstractions most likely to read badly, over the Python,
-//! JavaScript, Rust and Go corpora.
+//! JavaScript, Rust, Go and Ruby corpora.
 //! Run with `cargo test --test audit -- --ignored --nocapture`.
 
 use blockviz_core::ir::{EdgeKind, Kind, Scene};
@@ -22,7 +22,7 @@ fn load(dir: &Path, root: &Path, out: &mut Vec<blockviz_core::project::InFile>) 
 
 fn scene(name: &str) -> (Scene, Vec<blockviz_core::project::InFile>) {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let root = ["corpus", "corpus-js", "corpus-rs", "corpus-go"].iter().map(|c| fixtures.join(c).join(name)).find(|p| p.exists()).unwrap();
+    let root = ["corpus", "corpus-js", "corpus-rs", "corpus-go", "corpus-rb"].iter().map(|c| fixtures.join(c).join(name)).find(|p| p.exists()).unwrap();
     let mut files = vec![];
     load(&root, &root, &mut files);
     let s = blockviz_core::analyze(name, files);
@@ -42,6 +42,8 @@ fn line(s: &Scene, files: &[blockviz_core::project::InFile], n: &blockviz_core::
 fn codeish(t: &str) -> bool {
     // `<div>`, `<Dialog.Root>`: an element is named by its tag.
     let tag = t.starts_with('<') && t.ends_with('>') && t[1..t.len() - 1].chars().all(|c| c.is_alphanumeric() || ".:-_".contains(c));
+    // Ruby's `save!` and `empty?` are names.
+    let t = &t.split(' ').map(|w| w.trim_end_matches(['!', '?'])).collect::<Vec<_>>().join(" ");
     !tag && (t.contains('…') || t.chars().any(|c| "()[]{}=<>+*/%\"'!".contains(c)) || t.contains(" and ") || t.contains(" or ") || t.contains(" if ") || t.contains(" not "))
 }
 
@@ -53,7 +55,8 @@ fn audit() {
     let javascript = ["express-api", "nextjs-app", "nestjs-cats", "react-vite", "ky", "serve", "turborepo-basic"];
     let rust = ["mini-redis", "fd", "ripgrep-core", "axum-examples", "llama2-rs"];
     let go = ["groupcache", "realworld", "redcon", "chi", "glow", "example"];
-    for name in python.into_iter().chain(javascript).chain(rust).chain(go) {
+    let ruby = ["lobsters", "mission_control-jobs", "thor"];
+    for name in python.into_iter().chain(javascript).chain(rust).chain(go).chain(ruby) {
         if only.as_deref().is_some_and(|o| o != name) {
             continue;
         }

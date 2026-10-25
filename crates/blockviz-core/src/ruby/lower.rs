@@ -230,6 +230,26 @@ impl<'a> Lower<'a> {
                 self.body(p.body(), dest)
             }
             Node::CallNode { .. } => self.call_stmt(&n.as_call_node().unwrap(), dest),
+            // `@x = find(id) or raise NotFound` (the assignment binds first) and
+            // `valid? or return`: a guard on what the left side gives.
+            Node::OrNode { .. } if exits(&n.as_or_node().unwrap().right()) => {
+                let or = n.as_or_node().unwrap();
+                let left = or.left();
+                let (mut out, value) = if is_write(&left) {
+                    let stmts = self.write(&left);
+                    let target = match stmts.last() {
+                        Some(Stmt::Assign(a)) => a.targets.first().cloned(),
+                        _ => None,
+                    };
+                    (stmts, target.unwrap_or_else(|| other(nrange(&left))))
+                } else {
+                    (vec![], self.expr(&left))
+                };
+                let test = Expr::UnaryOp(ExprUnaryOp { op: UnaryOp::Not, operand: Box::new(value), range: nrange(&left) });
+                let body = self.stmt(&or.right(), &Dest::None);
+                out.push(if_(test, body, vec![], r));
+                out
+            }
             _ if is_write(n) => self.write(n),
             _ => {
                 let e = self.expr(n);
@@ -433,6 +453,14 @@ impl<'a> Lower<'a> {
                 return vec![Stmt::With(StmtWith { items: vec![go], body: vec![Stmt::Expr(StmtExpr { value: Box::new(call), range: r })], is_async: false, range: r })];
             }
         }
+        // `xs << x` adds to a list (or a string), as `xs.append(x)` does.
+        if let (Some(recv), "<<", [item]) = (c.receiver(), method.as_str(), &args[..]) {
+            let list = self.expr(&recv);
+            let item = self.expr(item);
+            let at = TextRange::new(range(&recv.location()).start(), c.message_loc().map(|m| range(&m).end()).unwrap_or(r.end()));
+            let func = Expr::Attribute(ExprAttribute { value: Box::new(list), attr: "append".into(), range: at });
+            return vec![Stmt::Expr(StmtExpr { value: Box::new(Expr::Call(ExprCall { func: Box::new(func), arguments: Arguments { args: vec![item], keywords: vec![] }, kind: CallKind::Call, range: r })), range: r })];
+        }
         // `x.y = v` and `x[k] = v` are stores.
         if c.is_attribute_write() || method == "[]=" {
             let Some(recv) = c.receiver() else { return vec![] };
@@ -580,6 +608,18 @@ impl<'a> Lower<'a> {
     /// `target = value`; a value computed by `if`, `case` or `begin` sets the
     /// target in each of its branches.
     fn assign(&mut self, target: Expr, value: &Node<'_>, r: TextRange) -> Vec<Stmt> {
+        // `@user = find(id) or raise NotFound`: the value, then a guard on it.
+        if let Some(or) = value.as_or_node() {
+            let right = or.right();
+                if exits(&right) {
+                let left = self.expr(&or.left());
+                let mut out = vec![Stmt::Assign(StmtAssign { targets: vec![target.clone()], value: Box::new(left), range: r })];
+                let test = Expr::UnaryOp(ExprUnaryOp { op: UnaryOp::Not, operand: Box::new(target), range: nrange(&or.left()) });
+                let body = self.stmt(&right, &Dest::None);
+                out.push(if_(test, body, vec![], nrange(&right)));
+                return out;
+            }
+        }
         if matches!(value, Node::CaseNode { .. } | Node::CaseMatchNode { .. } | Node::BeginNode { .. } | Node::UnlessNode { .. }) || matches!(value, Node::IfNode { .. } if value.as_if_node().is_some_and(|x| x.if_keyword_loc().is_some())) {
             return self.stmt(value, &Dest::Assign(target));
         }
@@ -1181,6 +1221,13 @@ impl<'a> Lower<'a> {
                 let (l, rt) = (self.expr(left), self.expr(right));
                 return Expr::Compare(ExprCompare { ops: vec![op], operands: vec![l, rt], range: r });
             }
+            // `s =~ /re/` matches.
+            if method == "=~" {
+                let (v, re) = (self.expr(left), self.expr(right));
+                let message = c.message_loc().map(|m| range(&m)).unwrap_or(r);
+                let func = Expr::Attribute(ExprAttribute { value: Box::new(v), attr: "match".into(), range: TextRange::new(r.start(), message.end()) });
+                return Expr::Call(ExprCall { func: Box::new(func), arguments: Arguments { args: vec![re], keywords: vec![] }, kind: CallKind::Call, range: r });
+            }
             if method == "[]" {
                 let (v, s) = (self.expr(left), self.expr(right));
                 return Expr::Subscript(ExprSubscript { value: Box::new(v), slice: Box::new(s), range: r });
@@ -1339,6 +1386,11 @@ fn badge(text: &str, range: TextRange) -> Decorator {
 fn if_(test: Expr, body: Vec<Stmt>, orelse: Vec<Stmt>, range: TextRange) -> Stmt {
     let elif_else_clauses = if orelse.is_empty() { vec![] } else { vec![ElifElseClause { test: None, range: orelse[0].range(), body: orelse }] };
     Stmt::If(StmtIf { test: Box::new(test), body, elif_else_clauses, range })
+}
+
+/// `raise …`, `fail …`, `return …`: the right side of a guard (`x or raise E`).
+fn exits(n: &Node<'_>) -> bool {
+    n.as_call_node().is_some_and(|c| c.receiver().is_none() && matches!(c.name().as_slice(), b"raise" | b"fail")) || matches!(n, Node::ReturnNode { .. } | Node::NextNode { .. } | Node::BreakNode { .. })
 }
 
 fn is_write(n: &Node<'_>) -> bool {
