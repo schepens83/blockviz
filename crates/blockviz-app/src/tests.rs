@@ -31,7 +31,18 @@ fn frame(cx: &mut VisualTestContext) {
     cx.run_until_parked();
 }
 
+/// Settings are kept under the home folder: tests get one of their own, not the reader's.
+fn sandbox_home() {
+    static HOME: std::sync::Once = std::sync::Once::new();
+    HOME.call_once(|| {
+        let home = std::env::temp_dir().join(format!("blockviz-test-home-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&home);
+        std::env::set_var("HOME", home);
+    });
+}
+
 fn open(cx: &mut TestAppContext) -> (Entity<Viewer>, &mut VisualTestContext) {
+    sandbox_home();
     cx.update(|cx| {
         crate::input::bind_keys(cx);
         crate::menus::bind(cx);
@@ -305,6 +316,7 @@ fn compare_reads_the_folder_at_a_revision_and_shows_what_changed(cx: &mut TestAp
     git(&["commit", "-q", "-m", "first"]);
     // The working tree adds a step.
     std::fs::write(dir.join("model.py"), MODEL_PY).unwrap();
+    sandbox_home();
     cx.update(crate::input::bind_keys);
     let f = live::read(&dir);
     let m = model(&f);
@@ -377,6 +389,7 @@ fn a_commit_about_to_be_made_is_shown_as_staged_against_head_whatever_is_on_disk
     std::fs::write(dir.join("model.py"), MODEL_PY).unwrap();
     git(&["add", "model.py"]);
     std::fs::write(dir.join("train.py"), "print(1)\n").unwrap();
+    sandbox_home();
     cx.update(crate::input::bind_keys);
     let (view, cx) = cx.add_window_view(|window, cx| Viewer::new(window, cx));
     view.update(cx, |v, cx| v.open_comparison(dir.clone(), crate::request::Spec::Staged, Some("Add the mlp".into()), cx));
@@ -396,4 +409,96 @@ fn a_commit_about_to_be_made_is_shown_as_staged_against_head_whatever_is_on_disk
     });
     assert_eq!(content(&view, cx), Content::Changes);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Opens the details panel and gives its left edge (where the resize handle is) and the pointer's steps.
+fn panel_edge(cx: &mut TestAppContext) -> (Entity<Viewer>, &mut VisualTestContext, Point<Pixels>) {
+    let (view, cx) = open(cx);
+    view.update(cx, |v, cx| {
+        v.panel_w = crate::viewer::PANEL_W;
+        let id = titled(v, "forward");
+        v.select(Some(id), Some(v.m.as_ref().unwrap().canonical_path(id)), cx);
+    });
+    frame(cx);
+    let panel = cx.debug_bounds("inspector").expect("the panel is open");
+    let edge = point(panel.origin.x, panel.origin.y + panel.size.height / 2.0);
+    (view, cx, edge)
+}
+
+fn press(cx: &mut VisualTestContext, at: Point<Pixels>, count: usize) {
+    cx.simulate_event(gpui::MouseDownEvent { position: at, modifiers: Modifiers::none(), button: gpui::MouseButton::Left, click_count: count, first_mouse: false });
+    frame(cx);
+}
+
+fn release(cx: &mut VisualTestContext, at: Point<Pixels>, count: usize) {
+    cx.simulate_event(gpui::MouseUpEvent { position: at, modifiers: Modifiers::none(), button: gpui::MouseButton::Left, click_count: count });
+    frame(cx);
+}
+
+fn drag_to(cx: &mut VisualTestContext, at: Point<Pixels>) {
+    cx.simulate_mouse_move(at, gpui::MouseButton::Left, Modifiers::none());
+    frame(cx);
+}
+
+#[gpui::test]
+fn dragging_the_panels_edge_left_widens_it_and_letting_go_ends_the_drag(cx: &mut TestAppContext) {
+    let (view, cx, edge) = panel_edge(cx);
+    let w0 = view.read_with(cx, |v, _| v.panel_w);
+    press(cx, edge, 1);
+    assert!(view.read_with(cx, |v, _| v.resizing.is_some()));
+    let to = point(edge.x - px(60.0), edge.y);
+    drag_to(cx, to);
+    assert_eq!(view.read_with(cx, |v, _| v.panel_w), w0 + 60.0);
+    release(cx, to, 1);
+    assert!(view.read_with(cx, |v, _| v.resizing.is_none()));
+    assert_eq!(view.read_with(cx, |v, _| v.panel_w), w0 + 60.0);
+}
+
+#[gpui::test]
+fn dragging_it_right_over_the_panel_narrows_it_and_letting_go_ends_the_drag(cx: &mut TestAppContext) {
+    let (view, cx, edge) = panel_edge(cx);
+    let w0 = view.read_with(cx, |v, _| v.panel_w);
+    press(cx, edge, 1);
+    let to = point(edge.x + px(50.0), edge.y);
+    drag_to(cx, to);
+    assert_eq!(view.read_with(cx, |v, _| v.panel_w), w0 - 50.0);
+    release(cx, to, 1);
+    assert!(view.read_with(cx, |v, _| v.resizing.is_none()));
+}
+
+#[gpui::test]
+fn a_double_click_on_the_edge_resets_the_width(cx: &mut TestAppContext) {
+    let (view, cx, edge) = panel_edge(cx);
+    // Widened first, then the edge (now elsewhere) is double-clicked.
+    press(cx, edge, 1);
+    let to = point(edge.x - px(80.0), edge.y);
+    drag_to(cx, to);
+    release(cx, to, 1);
+    assert_ne!(view.read_with(cx, |v, _| v.panel_w), crate::viewer::PANEL_W);
+    press(cx, to, 1);
+    release(cx, to, 1);
+    press(cx, to, 2);
+    release(cx, to, 2);
+    assert_eq!(view.read_with(cx, |v, _| v.panel_w), crate::viewer::PANEL_W);
+    assert!(view.read_with(cx, |v, _| v.resizing.is_none()));
+}
+
+#[gpui::test]
+fn the_window_still_answers_after_a_resize_even_if_the_button_is_released_elsewhere(cx: &mut TestAppContext) {
+    let (view, cx, edge) = panel_edge(cx);
+    press(cx, edge, 1);
+    drag_to(cx, point(edge.x + px(30.0), edge.y));
+    // Released outside the window's content, or never seen: the next press anywhere ends the drag, and acts.
+    let file = view.read_with(cx, |v, _| {
+        let id = titled(v, "model.py");
+        (id, v.hits.iter().find(|h| h.id == id).map(|h| point(px((h.rect.x + h.rect.w / 2.0) as f32), px((h.rect.y + 6.0) as f32))))
+    });
+    let (id, Some(at)) = file else { panic!("the file is drawn") };
+    // That press ends the drag; the next acts.
+    cx.simulate_click(at, Modifiers::none());
+    frame(cx);
+    assert!(view.read_with(cx, |v, _| v.resizing.is_none()));
+    cx.simulate_click(at, Modifiers::none());
+    frame(cx);
+    assert_eq!(view.read_with(cx, |v, _| v.selected), Some(id));
 }

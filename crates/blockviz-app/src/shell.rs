@@ -671,11 +671,7 @@ impl Viewer {
             .on_mouse_down(MouseButton::Left, cx.listener(|v, e: &MouseDownEvent, _, cx| {
                 cx.stop_propagation();
                 if e.click_count == 2 {
-                    v.panel_w = PANEL_W;
-                    v.settings.panel_w = None;
-                    v.settings.save();
-                    v.resizing = None;
-                    v.sync_panel(cx);
+                    v.reset_panel_width(cx);
                 } else {
                     v.resizing = Some((f32::from(e.position.x), v.panel_w));
                 }
@@ -988,6 +984,17 @@ impl Viewer {
         cx.notify();
     }
 
+    /// The panel's own width again (a double click on its edge), forgetting the one chosen.
+    fn reset_panel_width(&mut self, cx: &mut Context<Self>) {
+        self.panel_w = PANEL_W;
+        self.settings.panel_w = None;
+        self.settings.save();
+        self.resizing = None;
+        self.camera.insets = self.insets();
+        self.sync_panel(cx);
+        cx.notify();
+    }
+
     fn end_resize(&mut self, cx: &mut Context<Self>) {
         if self.resizing.take().is_some() {
             self.settings.panel_w = Some(self.panel_w);
@@ -1068,8 +1075,28 @@ impl Render for Viewer {
         }
         // While the edge is dragged, a sheet over everything keeps the pointer's moves coming to this
         // window: over the panel itself (narrowing) they would otherwise stop at the panel.
+        // The sheet takes the drag itself (it hides the window from the root's listeners), and is
+        // never left behind: letting go anywhere, or any press, ends it.
         if self.resizing.is_some() {
-            root = root.child(div().absolute().size_full().occlude().cursor(CursorStyle::ResizeColumn));
+            root = root.child(
+                div()
+                    .id("resize-sheet")
+                    .absolute()
+                    .size_full()
+                    .occlude()
+                    .cursor(CursorStyle::ResizeColumn)
+                    .on_mouse_move(cx.listener(Self::resize_move))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|v, _: &MouseUpEvent, _, cx| v.end_resize(cx)))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(|v, _: &MouseUpEvent, _, cx| v.end_resize(cx)))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|v, e: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        if e.click_count == 2 {
+                            v.reset_panel_width(cx);
+                        } else {
+                            v.end_resize(cx);
+                        }
+                    })),
+            );
         }
         root = root.when_some(self.busy_overlay(cx), |d, e| d.child(e)).when_some(self.toast(cx), |d, e| d.child(e));
         match &self.dialog {
