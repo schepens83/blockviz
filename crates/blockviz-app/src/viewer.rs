@@ -154,6 +154,8 @@ pub struct Viewer {
     pub marked: Option<usize>,
     /// Where the pointer to an off-screen marked block is drawn this frame, and the block.
     pub(crate) marker: Option<(crate::camera::Rect, u32)>,
+    /// When the window opened: the clock the glow breathes by.
+    started: Instant,
     /// The project on screen is a snapshot (the index, a revision) with this name, not a folder followed as it changes.
     pub snapshot: Option<String>,
     /// A comparison to start once the folder being opened has been analyzed.
@@ -233,6 +235,7 @@ impl Viewer {
             changes_open: true,
             marked: None,
             marker: None,
+            started: Instant::now(),
             snapshot: None,
             pending: None,
             scoped: !settings_unscoped,
@@ -924,10 +927,13 @@ impl Viewer {
         let at = self.camera.screen_box(m, &m.canonical_path(target));
         let Some(located) = crate::locate::locate(target, &ancestors, &self.hits, at, view) else { return };
         let label = crate::diff::block_name(m, m.node(target));
+        let t = self.started.elapsed().as_secs_f64();
         let mut pen = GpuiPen::new(window, cx, origin);
-        if let Some(area) = crate::locate::draw(&mut pen, &self.theme, located, change.status, &label, view) {
+        if let Some(area) = crate::locate::draw(&mut pen, &self.theme, located, change.status, &label, view, t) {
             self.marker = Some((area, target));
         }
+        // The glow breathes for as long as the block is pointed out.
+        window.request_animation_frame();
     }
 
     /// The block in the diagram a marked change is: itself, or for a removed one the block it was in.
@@ -1162,7 +1168,8 @@ impl Viewer {
                 self.sync_hover(cx);
                 redraw = true;
             }
-            let cursor = if id.is_none() && self.hover_edge.is_none() { CursorStyle::OpenHand } else { CursorStyle::PointingHand };
+            let on_marker = self.marker.is_some_and(|(a, _)| a.contains(x, y));
+            let cursor = if id.is_none() && self.hover_edge.is_none() && !on_marker { CursorStyle::OpenHand } else { CursorStyle::PointingHand };
             if cursor != self.cursor {
                 self.cursor = cursor;
                 redraw = true;

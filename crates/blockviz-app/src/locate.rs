@@ -6,7 +6,7 @@ use crate::camera::{Insets, Rect};
 use crate::diff::Status;
 use crate::pen::{Align, Family, Font, Pen};
 use crate::render::Hit;
-use crate::theme::Theme;
+use crate::theme::{Color, Theme};
 
 /// What to point out.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,65 +72,119 @@ pub fn edge_marker(view: Rect, target: Rect, margin: f64) -> Option<Marker> {
     Some(Marker { x: cx + dx * k, y: cy + dy * k, angle: dy.atan2(dx) })
 }
 
-/// The marker's hit area: the arrow and its label, which sits toward the middle of the view.
-pub fn marker_area(m: Marker, label_w: f64) -> Rect {
-    let w = 24.0 + label_w;
-    let x = if m.angle.cos() > 0.0 { m.x - w + 12.0 } else { m.x - 12.0 };
-    Rect { x, y: m.y - 12.0, w, h: 24.0 }
+/// How the located block is shown: every number that sets how loud it is.
+pub mod look {
+    /// How far the spotlight's hole reaches past the block.
+    pub const HOLE_PAD: f64 = 8.0;
+    /// The scrim over the rest of the diagram: darker on a dark theme; lighter when only the block around is cut out.
+    pub const SCRIM_LIGHT: f32 = 0.35;
+    pub const SCRIM_DARK: f32 = 0.45;
+    pub const SCRIM_WITHIN: f32 = 0.20;
+    /// The ring: how far outside the block, how thick (dashed when the block it rings is the one around).
+    pub const RING_OFFSET: f64 = 4.0;
+    pub const RING_W: f64 = 4.0;
+    pub const RING_W_WITHIN: f64 = 3.0;
+    pub const RING_DASH: [f64; 2] = [9.0, 6.0];
+    /// The glow outside the ring, and how it breathes.
+    pub const GLOW_W: f64 = 10.0;
+    pub const GLOW_MIN: f64 = 0.15;
+    pub const GLOW_MAX: f64 = 0.4;
+    pub const BREATH_SECONDS: f64 = 1.6;
+    /// The edge marker, against its first size.
+    pub const MARKER_SCALE: f64 = 1.4;
+    pub const MARKER_TEXT: u32 = 0xfafafa;
 }
 
-const LABEL: Font = Font { px: 11.5, family: Family::Sans, weight: 600 };
+/// The glow's strength `t` seconds in: it breathes between its least and its most.
+pub fn glow_alpha(t: f64) -> f64 {
+    let wave = 0.5 + 0.5 * (std::f64::consts::TAU * t / look::BREATH_SECONDS).sin();
+    look::GLOW_MIN + (look::GLOW_MAX - look::GLOW_MIN) * wave
+}
 
-/// Draws what `located` says over the diagram, in the change's color (removed ones dashed).
-/// Returns the marker's hit area when the block is out of view.
-pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, label: &str, view: Rect) -> Option<Rect> {
+/// The four bands of `view` around `hole`, for a scrim with a window cut out of it (the hole kept inside the view).
+pub fn scrim_rects(view: Rect, hole: Rect) -> [Rect; 4] {
+    let x0 = hole.x.clamp(view.x, view.x + view.w);
+    let x1 = (hole.x + hole.w).clamp(view.x, view.x + view.w);
+    let y0 = hole.y.clamp(view.y, view.y + view.h);
+    let y1 = (hole.y + hole.h).clamp(view.y, view.y + view.h);
+    [
+        Rect { x: view.x, y: view.y, w: view.w, h: y0 - view.y },
+        Rect { x: view.x, y: y1, w: view.w, h: view.y + view.h - y1 },
+        Rect { x: view.x, y: y0, w: x0 - view.x, h: y1 - y0 },
+        Rect { x: x1, y: y0, w: view.x + view.w - x1, h: y1 - y0 },
+    ]
+}
+
+/// The marker's hit area: the arrow and its label, which sits toward the middle of the view.
+pub fn marker_area(m: Marker, label_w: f64) -> Rect {
+    let k = look::MARKER_SCALE;
+    let w = 24.0 * k + label_w;
+    let x = if m.angle.cos() > 0.0 { m.x - w + 12.0 * k } else { m.x - 12.0 * k };
+    Rect { x, y: m.y - 12.0 * k, w, h: 24.0 * k }
+}
+
+const LABEL: Font = Font { px: 11.5 * look::MARKER_SCALE, family: Family::Sans, weight: 700 };
+
+/// Draws what `located` says over the diagram, in the change's color (removed ones dashed): the rest of the view
+/// dimmed, a ring round the block and a glow breathing outside it (`t`, seconds, sets the breath). Returns the
+/// marker's hit area when the block is out of view.
+pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, label: &str, view: Rect, t: f64) -> Option<Rect> {
+    use look::*;
     let ink = theme.change(status).ink;
     match located {
         Located::Itself(r) | Located::Within(_, r) => {
             let within = matches!(located, Located::Within(..));
-            let pad = if within { 4.0 } else { 3.0 };
             pen.save();
-            pen.set_fill(ink);
-            pen.set_alpha(if within { 0.10 } else { 0.16 });
-            pen.begin_path();
-            pen.round_rect(r.x - pad, r.y - pad, r.w + 2.0 * pad, r.h + 2.0 * pad, 6.0);
-            pen.fill();
-            pen.set_alpha(if within { 0.75 } else { 1.0 });
-            pen.set_stroke(ink);
-            pen.set_line_width(if within { 2.0 } else { 3.0 });
-            pen.set_round_join(true);
-            if within || status == Status::Removed {
-                pen.set_dash(&[7.0, 5.0]);
+            // The spotlight.
+            let hole = Rect { x: r.x - HOLE_PAD, y: r.y - HOLE_PAD, w: r.w + 2.0 * HOLE_PAD, h: r.h + 2.0 * HOLE_PAD };
+            pen.set_fill(Color::rgba(0, 0, 0, 1.0));
+            pen.set_alpha(if within { SCRIM_WITHIN } else if theme.dark { SCRIM_DARK } else { SCRIM_LIGHT } as f64);
+            for b in scrim_rects(view, hole) {
+                if b.w > 0.0 && b.h > 0.0 {
+                    pen.fill_rect(b.x, b.y, b.w, b.h);
+                }
             }
-            pen.begin_path();
-            pen.round_rect(r.x - pad, r.y - pad, r.w + 2.0 * pad, r.h + 2.0 * pad, 6.0);
-            pen.stroke();
+            // The ring, and the glow outside it.
+            let o = RING_OFFSET;
+            let ring = |pen: &mut dyn Pen, grow: f64, width: f64, alpha: f64, dashed: bool| {
+                pen.set_alpha(alpha);
+                pen.set_stroke(ink);
+                pen.set_line_width(width);
+                pen.set_round_join(true);
+                pen.set_dash(if dashed { &RING_DASH } else { &[] });
+                pen.begin_path();
+                pen.round_rect(r.x - o - grow, r.y - o - grow, r.w + 2.0 * (o + grow), r.h + 2.0 * (o + grow), 8.0 + grow);
+                pen.stroke();
+            };
+            let dashed = within || status == Status::Removed;
+            ring(pen, RING_W / 2.0 + GLOW_W / 2.0, GLOW_W, glow_alpha(t), false);
+            ring(pen, 0.0, if within { RING_W_WITHIN } else { RING_W }, 1.0, dashed);
             pen.restore();
             None
         }
         Located::Away(target) => {
-            let m = edge_marker(view, target, 16.0)?;
+            let m = edge_marker(view, target, 16.0 * MARKER_SCALE)?;
+            let k = MARKER_SCALE;
             pen.save();
             pen.set_font(LABEL);
             let text = if label.chars().count() > 28 { format!("{}…", label.chars().take(27).collect::<String>()) } else { label.to_string() };
             let w = pen.measure(&text);
-            let area = marker_area(m, w + 10.0);
-            // The label's plate, on the side toward the middle of the view.
-            pen.set_fill(theme.paper);
-            pen.set_alpha(0.94);
+            let area = marker_area(m, w + 10.0 * k);
+            // A shadow, then the plate in the change's color on the side toward the middle of the view.
+            pen.set_fill(Color::rgba(0, 0, 0, 1.0));
+            pen.set_alpha(0.25);
             pen.begin_path();
-            pen.round_rect(area.x, area.y, area.w, area.h, 12.0);
+            pen.round_rect(area.x, area.y + 3.0, area.w, area.h, 12.0 * k);
             pen.fill();
-            pen.set_alpha(1.0);
-            pen.set_stroke(ink);
-            pen.set_line_width(1.5);
-            pen.begin_path();
-            pen.round_rect(area.x, area.y, area.w, area.h, 12.0);
-            pen.stroke();
-            // The arrow, pointing at the block.
-            let (c, s) = (m.angle.cos(), m.angle.sin());
-            let at = |u: f64, v: f64| (m.x + u * c - v * s, m.y + u * s + v * c);
             pen.set_fill(ink);
+            pen.set_alpha(1.0);
+            pen.begin_path();
+            pen.round_rect(area.x, area.y, area.w, area.h, 12.0 * k);
+            pen.fill();
+            // The arrow, pointing at the block, and the name.
+            let (c, s) = (m.angle.cos(), m.angle.sin());
+            let at = |u: f64, v: f64| (m.x + k * (u * c - v * s), m.y + k * (u * s + v * c));
+            pen.set_fill(Color::hex(MARKER_TEXT));
             pen.begin_path();
             let (x0, y0) = at(6.0, 0.0);
             pen.move_to(x0, y0);
@@ -140,11 +194,9 @@ pub fn draw(pen: &mut dyn Pen, theme: &Theme, located: Located, status: Status, 
             pen.line_to(x2, y2);
             pen.close_path();
             pen.fill();
-            // Its name, on the plate.
-            pen.set_fill(theme.change(status).ink);
             pen.set_align(Align::Left);
-            let tx = if c > 0.0 { area.x + 10.0 } else { area.x + 24.0 };
-            pen.fill_text(&text, tx, area.y + 16.0);
+            let tx = if c > 0.0 { area.x + 10.0 * k } else { area.x + 24.0 * k };
+            pen.fill_text(&text, tx, area.y + 16.0 * k);
             pen.restore();
             Some(area)
         }
@@ -212,6 +264,28 @@ mod tests {
     #[test]
     fn there_is_no_marker_for_a_block_in_view() {
         assert_eq!(edge_marker(VIEW, rect(700.0, 100.0, 300.0, 50.0), 10.0), None);
+    }
+
+    #[test]
+    fn the_scrim_leaves_a_hole_and_covers_the_rest_of_the_view_once() {
+        let hole = rect(100.0, 150.0, 200.0, 80.0);
+        let bands = scrim_rects(VIEW, hole);
+        let area: f64 = bands.iter().map(|b| b.w * b.h).sum();
+        assert!((area - (VIEW.w * VIEW.h - hole.w * hole.h)).abs() < 1e-6);
+        // None of the bands touches the hole.
+        assert!(bands.iter().all(|b| b.w <= 0.0 || b.h <= 0.0 || b.x >= hole.x + hole.w || b.x + b.w <= hole.x || b.y >= hole.y + hole.h || b.y + b.h <= hole.y));
+        // A hole hanging out of the view is cut to it.
+        let half = scrim_rects(VIEW, rect(-50.0, 0.0, 100.0, 100.0));
+        let covered: f64 = half.iter().map(|b| b.w * b.h).sum();
+        assert!((covered - (VIEW.w * VIEW.h - 50.0 * 50.0)).abs() < 1e-6, "{covered}");
+    }
+
+    #[test]
+    fn the_glow_breathes_between_its_least_and_its_most() {
+        let samples: Vec<f64> = (0..160).map(|i| glow_alpha(i as f64 * 0.01)).collect();
+        let (lo, hi) = (samples.iter().cloned().fold(f64::MAX, f64::min), samples.iter().cloned().fold(f64::MIN, f64::max));
+        assert!((lo - look::GLOW_MIN).abs() < 1e-3 && (hi - look::GLOW_MAX).abs() < 1e-3, "{lo} {hi}");
+        assert!((glow_alpha(0.0) - glow_alpha(look::BREATH_SECONDS)).abs() < 1e-9);
     }
 
     #[test]
