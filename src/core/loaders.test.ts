@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryCache } from './cache';
-import { directoryProject, type DirectoryHandle, fileChanges, firstFiles, githubComparison, githubProject, guessFilename, ignoredPath, isComparison, isTestPath, parseGitHub, pastedProject, readable } from './loaders';
+import { directoryProject, type DirectoryHandle, fileChanges, firstFiles, githubComparison, githubProject, gitBranches, gitComparison, gitLog, gitOrder, gitServer, guessFilename, ignoredPath, isComparison, isTestPath, parseGitHub, pastedProject, pickRepo, readable } from './loaders';
 
 describe('pasted code', () => {
   it('is Python unless it uses JavaScript syntax', () => {
@@ -286,5 +286,88 @@ describe('a folder opened with showDirectoryPicker', () => {
     expect(opened).not.toContain('shop/tmp');
     expect(opened).not.toContain('shop/node_modules');
     expect(opened).not.toContain('shop/app/javascript/builds');
+  });
+});
+
+describe('local git branches', () => {
+  const answer = (status: number, body: unknown) => vi.fn(async (_url: string, _init?: RequestInit) => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('asks the dev server for a comparison', async () => {
+    const info = { kind: 'local', title: 'main...dev', files: [] };
+    const fetch = answer(200, { base: { name: 'p', files: [], source: 'local git' }, head: { name: 'p', files: [], source: 'local git' }, info });
+    vi.stubGlobal('fetch', fetch);
+    const ctl = new AbortController();
+    const c = await gitComparison('/home/me/my app', { mode: 'branch', base: 'main', head: 'dev' }, () => {}, ctl.signal);
+    expect(c.info.title).toBe('main...dev');
+    expect(fetch.mock.calls[0][0]).toBe('/__git/compare?repo=%2Fhome%2Fme%2Fmy+app&mode=branch&base=main&head=dev');
+    expect(fetch.mock.calls[0][1]?.signal).toBe(ctl.signal);
+  });
+
+  it('asks for the working tree without refs', async () => {
+    const fetch = answer(200, { info: { kind: 'local' } });
+    vi.stubGlobal('fetch', fetch);
+    await gitComparison('/r', { mode: 'worktree' }, () => {});
+    expect(fetch.mock.calls[0][0]).toBe('/__git/compare?repo=%2Fr&mode=worktree');
+  });
+
+  it('asks for a repository in the dialog of the machine the server runs on', async () => {
+    const fetch = answer(200, { repo: '/home/me/app' });
+    vi.stubGlobal('fetch', fetch);
+    expect(await pickRepo()).toBe('/home/me/app');
+    expect(fetch.mock.calls[0][0]).toBe('/__git/pick');
+    vi.stubGlobal('fetch', answer(200, { repo: null }));
+    expect(await pickRepo()).toBeNull();
+    vi.stubGlobal('fetch', answer(400, { error: 'No folder dialog found' }));
+    await expect(pickRepo()).rejects.toThrow('No folder dialog found');
+  });
+
+  it('tells a dev server from a static page', async () => {
+    vi.stubGlobal('fetch', answer(400, { error: 'Enter the repository as an absolute path' }));
+    expect(await gitServer()).toBe(true);
+    vi.stubGlobal('fetch', answer(200, '<!doctype html>'));
+    expect(await gitServer()).toBe(false);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    expect(await gitServer()).toBe(false);
+  });
+
+  it('lists commits, searched or from one ref', async () => {
+    const fetch = answer(200, { commits: [{ sha: 'abc', short: 'abc', subject: 's', author: 'a', date: 'd', refs: [] }] });
+    vi.stubGlobal('fetch', fetch);
+    expect((await gitLog('/r', {}))[0].short).toBe('abc');
+    expect(fetch.mock.calls[0][0]).toBe('/__git/log?repo=%2Fr');
+    await gitLog('/r', { ref: 'v1', q: 'fix bug', limit: 20 });
+    expect(fetch.mock.calls[1][0]).toBe('/__git/log?repo=%2Fr&ref=v1&q=fix+bug&limit=20');
+  });
+
+  it('asks which revision is older', async () => {
+    const fetch = answer(200, { baseSha: 'a', headSha: 'b', baseIsAncestorOfHead: true, headIsAncestorOfBase: false });
+    vi.stubGlobal('fetch', fetch);
+    expect((await gitOrder('/r', 'HEAD~3', 'main')).baseIsAncestorOfHead).toBe(true);
+    expect(fetch.mock.calls[0][0]).toBe('/__git/order?repo=%2Fr&base=HEAD%7E3&head=main');
+    vi.stubGlobal('fetch', answer(400, { error: 'No revision named x in /r' }));
+    await expect(gitOrder('/r', 'x', 'main')).rejects.toThrow('No revision named x');
+  });
+
+  it('lists the branches', async () => {
+    const fetch = answer(200, { current: 'dev', branches: ['dev', 'main'], defaultBase: 'main' });
+    vi.stubGlobal('fetch', fetch);
+    expect((await gitBranches('/r')).defaultBase).toBe('main');
+    expect(fetch.mock.calls[0][0]).toBe('/__git/branches?repo=%2Fr');
+  });
+
+  it('says what the server said was wrong', async () => {
+    vi.stubGlobal('fetch', answer(400, { error: 'No branch named x in /r' }));
+    await expect(gitComparison('/r', { mode: 'branch', base: 'main', head: 'x' }, () => {})).rejects.toThrow('No branch named x in /r');
+  });
+
+  it('needs the dev server', async () => {
+    const need = 'Local git diffs need the dev server (npm run dev).';
+    vi.stubGlobal('fetch', answer(404, 'not found'));
+    await expect(gitBranches('/r')).rejects.toThrow(need);
+    vi.stubGlobal('fetch', answer(200, '<!doctype html>'));
+    await expect(gitComparison('/r', { mode: 'branch', base: 'main', head: 'x' }, () => {})).rejects.toThrow(need);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await expect(gitBranches('/r')).rejects.toThrow(need);
   });
 });

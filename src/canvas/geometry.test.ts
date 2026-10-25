@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SceneNode } from '../core/types';
-import { childXf, frame, frameAround, frameReadable, NO_INSETS, parentXf, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
+import { childXf, frame, frameAround, frameReadable, NO_INSETS, panToReveal, parentXf, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
 
 const box = (over: Partial<SceneNode> = {}): SceneNode => ({
   id: 1, kind: 'function', shape: 'box', category: 'function', title: 'f',
@@ -179,5 +179,29 @@ describe('lines cut to the screen', () => {
 
   it('goes round a rectangle as roundRect does, its corners no rounder than it fits', () => {
     expect(rectLine({ x: 0, y: 0, w: 40, h: 10 }, 8)).toEqual({ pts: [5, 0, 40, 0, 40, 10, 0, 10, 0, 0, 5, 0], radii: [0, 5, 5, 5, 5, 0] });
+  });
+});
+
+describe('panning a box into view', () => {
+  const i = { top: 50, right: 300, bottom: 40, left: 0 };
+  // The visible part of a 1000×600 screen is 700×510 from (0, 50), less the margin.
+  it('leaves a box that is in view where it is', () => {
+    expect(panToReveal({ x: 100, y: 100, w: 50, h: 50 }, 1000, 600, i, 10)).toEqual({ dx: 0, dy: 0 });
+  });
+
+  it('moves a box that sticks out just far enough', () => {
+    expect(panToReveal({ x: 650, y: 100, w: 100, h: 50 }, 1000, 600, i, 10)).toEqual({ dx: -60, dy: 0 });
+    expect(panToReveal({ x: 100, y: 20, w: 50, h: 50 }, 1000, 600, i, 10)).toEqual({ dx: 0, dy: 40 });
+  });
+
+  it('centers a box that is off screen', () => {
+    const p = panToReveal({ x: 2000, y: 1000, w: 100, h: 100 }, 1000, 600, i, 10);
+    expect(2000 + p.dx + 50).toBe(350);
+    expect(1000 + p.dy + 50).toBe(305);
+  });
+
+  it('shows the start of a box too big to fit, and leaves one that fills the view', () => {
+    expect(panToReveal({ x: -500, y: 100, w: 3000, h: 50 }, 1000, 600, i, 10)).toEqual({ dx: 0, dy: 0 });
+    expect(panToReveal({ x: 900, y: 100, w: 3000, h: 50 }, 1000, 600, i, 10).dx).toBe(-890);
   });
 });

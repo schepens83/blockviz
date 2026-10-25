@@ -1,6 +1,6 @@
-import { browserCache, type RepoCache, type SavedFile, type SavedRepo } from './cache';
-import { gitignores } from './gitignore';
-import type { CompareInfo, Comparison, FileChange, InputFile, LeftOut, Project } from './types';
+import { browserCache, type RepoCache, type SavedFile, type SavedRepo } from './cache.ts';
+import { gitignores } from './gitignore.ts';
+import type { Commit, CommitOrder, CompareInfo, Comparison, FileChange, GitMode, InputFile, LeftOut, Project } from './types.ts';
 
 // Keep in step with `IGNORED_DIRS` in crates/blockviz-core/src/project.rs.
 const IGNORED = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', '.mypy_cache', '.pytest_cache', '.ruff_cache', '.tox', '.idea', '.vscode', '.ipynb_checkpoints', 'dist', 'build', 'target', '.next', '.cache', 'site-packages', '.eggs', '.turbo', '.nuxt', '.svelte-kit', '.output', '.vercel', '.parcel-cache', '.yarn', 'bower_components', 'storybook-static']);
@@ -73,7 +73,7 @@ export type Progress = (message: string, fraction?: number) => void;
 
 /** karpathy/nanoGPT, bundled as an example. */
 export async function exampleProject(): Promise<Project> {
-  const { files } = await import('./example');
+  const { files } = await import('./example.ts');
   return { name: 'nanoGPT', files: [...files].sort((a, b) => a.path.localeCompare(b.path)), source: 'github.com/karpathy/nanoGPT' };
 }
 
@@ -176,6 +176,59 @@ export async function droppedProject(items: DataTransferItemList, progress: Prog
   progress(`Reading ${entries.length} files…`);
   const name = roots.length === 1 && roots[0].isDirectory ? roots[0].name : 'dropped files';
   return { name, ...(await readFiles(entries, progress)), source: 'dropped files' };
+}
+
+export const NEEDS_SERVER = 'Local git diffs need the dev server (npm run dev).';
+
+/** Asks the dev server's git endpoint; a static build has none, and answers with a page or an error. */
+async function askGit<T>(endpoint: string, params: Record<string, string>, signal?: AbortSignal): Promise<T> {
+  let res: Response;
+  let json: (T & { error?: string }) | undefined;
+  try {
+    const query = new URLSearchParams(params).toString();
+    res = await fetch(`/__git/${endpoint}${query ? `?${query}` : ''}`, { signal });
+    json = await res.json();
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new Error(NEEDS_SERVER);
+  }
+  if (!res.ok) throw new Error(json?.error ?? NEEDS_SERVER);
+  return json as T;
+}
+
+/** Whether this page comes from a server that reads git (the dev server): a static build answers with a page, not an error. */
+export async function gitServer(): Promise<boolean> {
+  return gitBranches('').then(() => true, e => e instanceof Error && e.message !== NEEDS_SERVER);
+}
+
+/** Commits of the repository at `repo` to choose from: those of `ref` (else of every branch), matching `q`. */
+export async function gitLog(repo: string, { ref, q, limit }: { ref?: string; q?: string; limit?: number }, signal?: AbortSignal): Promise<Commit[]> {
+  const params: Record<string, string> = { repo, ...(ref ? { ref } : {}), ...(q ? { q } : {}), ...(limit ? { limit: String(limit) } : {}) };
+  return (await askGit<{ commits: Commit[] }>('log', params, signal)).commits;
+}
+
+/** Which of two revisions is the older (a comparison from a later one to an earlier one runs backwards). */
+export function gitOrder(repo: string, base: string, head: string, signal?: AbortSignal): Promise<CommitOrder> {
+  return askGit('order', { repo, base, head }, signal);
+}
+
+/** A repository chosen in the system's folder dialog, which opens on the machine running the server (null: cancelled). */
+export async function pickRepo(): Promise<string | null> {
+  return (await askGit<{ repo: string | null }>('pick', {})).repo;
+}
+
+/** The local branches of the repository at `repo`, and the one checked out. */
+export function gitBranches(repo: string, signal?: AbortSignal): Promise<{ current: string | null; branches: string[]; defaultBase: string | null; tags: string[]; dirty: boolean }> {
+  return askGit('branches', { repo }, signal);
+}
+
+/** What a local repository is compared as: a branch with its base (`base...head`, as on GitHub), two exact revisions, or the working tree with HEAD. */
+export type GitCompare = { mode: GitMode; base: string; head: string } | { mode: 'worktree' };
+
+/** Two versions of a local repository, read by the dev server with git. */
+export function gitComparison(repo: string, how: GitCompare, progress: Progress, signal?: AbortSignal): Promise<Comparison> {
+  progress('Reading the repository with git…');
+  return askGit('compare', { repo, ...how }, signal);
 }
 
 /** A GitHub location: a repository (a branch, a folder), a pull request, or two versions compared. */

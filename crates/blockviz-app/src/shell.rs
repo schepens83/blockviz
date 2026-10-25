@@ -9,7 +9,7 @@ use crate::icons::icon;
 use crate::pen::Pen;
 use crate::render::drawn_in;
 use crate::theme::{Color, Ui, LEGEND, MONO_FONT, UI_FONT};
-use crate::viewer::{Dialog, Menu, Viewer, PANEL_MIN, PANEL_W};
+use crate::viewer::{dragged_width, Dialog, Menu, Viewer, PANEL_W};
 use blockviz_core::ir::EdgeKind;
 use gpui::{
     canvas, div, percentage, prelude::*, px, svg, Animation, AnimationExt, AnyElement, App, Bounds, Context, CursorStyle, ExternalPaths,
@@ -391,6 +391,7 @@ impl Viewer {
                     self.menu_item("uncommitted", line("Uncommitted changes".into(), "The folder as it is, against the last commit (HEAD)".into()))
                         .on_click(cx.listener(|v, _, _, cx| v.start_compare("HEAD".into(), "Uncommitted changes".into(), "HEAD".into(), "Working tree vs HEAD".into(), cx))),
                 );
+                menu = menu.child(self.menu_item("staged", line("Staged changes".into(), "What a commit would make, against HEAD".into())).on_click(cx.listener(|v, _, _, cx| v.compare_staged(cx))));
                 if let Some(base) = self.default_branch.clone() {
                     let short = base.trim_start_matches("origin/").to_string();
                     if self.branch.as_deref() != Some(short.as_str()) {
@@ -981,8 +982,7 @@ impl Viewer {
         if !e.dragging() {
             return self.end_resize(cx);
         }
-        let max = (self.width - 160.0).max(PANEL_MIN);
-        self.panel_w = (w0 - (f32::from(e.position.x) - x0) as f64).clamp(PANEL_MIN, max);
+        self.panel_w = dragged_width(w0, f32::from(x0) as f64, f32::from(e.position.x) as f64, self.width);
         self.camera.insets = self.insets();
         self.sync_panel(cx);
         cx.notify();
@@ -1065,6 +1065,11 @@ impl Render for Viewer {
         root = root.child(self.toolbar(cx)).when_some(self.menus(cx), |d, e| d.child(e));
         if loaded {
             root = root.child(self.zoombar(cx)).child(self.footer(cx)).when_some(self.legend_panel(cx), |d, e| d.child(e)).when_some(self.panel(cx), |d, e| d.child(e));
+        }
+        // While the edge is dragged, a sheet over everything keeps the pointer's moves coming to this
+        // window: over the panel itself (narrowing) they would otherwise stop at the panel.
+        if self.resizing.is_some() {
+            root = root.child(div().absolute().size_full().occlude().cursor(CursorStyle::ResizeColumn));
         }
         root = root.when_some(self.busy_overlay(cx), |d, e| d.child(e)).when_some(self.toast(cx), |d, e| d.child(e));
         match &self.dialog {

@@ -232,7 +232,7 @@ fn a_comparison_lists_the_changes_and_steps_through_them(cx: &mut TestAppContext
         let head = v.m.clone().unwrap();
         let changes = crate::git::changes(&old, &v.project.as_ref().unwrap().files);
         let diff = Rc::new(crate::diff::SceneDiff::new(base.clone(), head, changes));
-        v.compare = Some(crate::viewer::Compared { rev: "HEAD".into(), kind: "Uncommitted changes".into(), label: "HEAD".into(), title: "Working tree vs HEAD".into(), base_files: old.clone(), base, diff });
+        v.compare = Some(crate::viewer::Compared { rev: "HEAD".into(), kind: "Uncommitted changes".into(), label: "HEAD".into(), title: "Working tree vs HEAD".into(), base_files: old.clone(), base, diff, head_label: "working tree".into() });
         v.changes_open = true;
         v.sync_panel(cx);
         cx.notify();
@@ -241,10 +241,22 @@ fn a_comparison_lists_the_changes_and_steps_through_them(cx: &mut TestAppContext
     assert_eq!(content(&view, cx), Content::Changes);
     let total = view.read_with(cx, |v, _| v.compare.as_ref().unwrap().diff.changes.len());
     assert!(total >= 1);
+    // N marks the first change in the list, without leaving it or moving to it.
     cx.simulate_keystrokes("n");
+    frame(cx);
+    assert_eq!(view.read_with(cx, |v, _| v.marked), Some(0));
+    assert_eq!(content(&view, cx), Content::Changes);
+    // Zooming to a change (a double click) reads it in the panel.
+    view.update(cx, |v, cx| v.go_to_change(0, cx));
     frame(cx);
     assert_eq!(view.read_with(cx, |v, _| v.change_index()), Some(0));
     assert!(matches!(content(&view, cx), Content::Block(_) | Content::Removed(_)));
+    // The list is limited to what the view is zoomed into, unless switched off.
+    let all = view.read_with(cx, |v, _| v.visible_changes().len());
+    assert_eq!(all, total);
+    view.update(cx, |v, cx| v.set_scoped(false, cx));
+    assert_eq!(view.read_with(cx, |v, _| v.visible_changes().len()), total);
+    view.update(cx, |v, cx| v.set_scoped(true, cx));
     // Esc goes back to the list, and again closes it.
     view.update(cx, |v, cx| v.show_changes(cx));
     frame(cx);
@@ -345,4 +357,43 @@ fn the_menu_bar_drives_the_view(cx: &mut TestAppContext) {
     let menus = crate::menus::menus(&["/a/one".into(), "/b/two".into()]);
     let names: Vec<String> = menus.iter().map(|m| m.name.to_string()).collect();
     assert_eq!(names, ["blockviz", "File", "Edit", "View", "Compare", "Window"]);
+}
+
+#[gpui::test]
+fn a_commit_about_to_be_made_is_shown_as_staged_against_head_whatever_is_on_disk(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("blockviz-staged-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@e.c", "-c", "commit.gpgsign=false"]).args(args).current_dir(&dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q", "-b", "main"]);
+    std::fs::write(dir.join("model.py"), MODEL_PY.replace("        x = x + self.mlp(x)\n", "")).unwrap();
+    std::fs::write(dir.join("train.py"), TRAIN_PY).unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "first"]);
+    // Staged: the step added. On disk afterwards: train.py changed too, but not staged.
+    std::fs::write(dir.join("model.py"), MODEL_PY).unwrap();
+    git(&["add", "model.py"]);
+    std::fs::write(dir.join("train.py"), "print(1)\n").unwrap();
+    cx.update(crate::input::bind_keys);
+    let (view, cx) = cx.add_window_view(|window, cx| Viewer::new(window, cx));
+    view.update(cx, |v, cx| v.open_comparison(dir.clone(), crate::request::Spec::Staged, Some("Add the mlp".into()), cx));
+    for _ in 0..100 {
+        frame(cx);
+        if view.read_with(cx, |v, _| v.compare.is_some()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    view.read_with(cx, |v, _| {
+        let c = v.compare.as_ref().expect("comparing");
+        assert_eq!(c.diff.files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(), ["model.py"]);
+        assert_eq!((c.title.as_str(), c.head_label.as_str()), ("Add the mlp", "staged"));
+        assert!(c.diff.changes.len() >= 1);
+        assert_eq!(v.snapshot.as_deref(), Some("staged"));
+    });
+    assert_eq!(content(&view, cx), Content::Changes);
+    std::fs::remove_dir_all(&dir).unwrap();
 }

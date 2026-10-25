@@ -73,6 +73,7 @@ pub struct CompareView {
     pub kind: String,
     pub label: String,
     pub title: String,
+    pub head_label: String,
 }
 
 pub struct PanelState {
@@ -82,6 +83,11 @@ pub struct PanelState {
     pub hover: Option<u32>,
     pub compare: Option<CompareView>,
     pub change_index: Option<usize>,
+    /// The changes listed (by index), the block the view is zoomed into, whether the list is limited to it, and the change unfolded.
+    pub visible: Vec<usize>,
+    pub scope: u32,
+    pub scoped: bool,
+    pub marked: Option<usize>,
     pub ui: Ui,
 }
 
@@ -127,6 +133,10 @@ impl Inspector {
 
     pub fn set(&mut self, state: Option<PanelState>, cx: &mut Context<Self>) {
         let same = matches!((&self.state, &state), (Some(a), Some(b)) if a.content == b.content && Rc::ptr_eq(&a.m, &b.m));
+        // Another change unfolded starts with its unchanged stretches folded.
+        if !matches!((&self.state, &state), (Some(a), Some(b)) if a.marked == b.marked) {
+            self.unfolded.clear();
+        }
         if !same {
             self.all_uses = false;
             self.unfolded.clear();
@@ -781,11 +791,22 @@ impl Inspector {
                 .text_size(px(12.0))
                 .child(code(c.label.clone()))
                 .child("←")
-                .child(code("working tree".into()))
+                .child(code(c.head_label.clone()))
                 .child(div().ml_auto().id("stop").text_color(ui.accent).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.act(cx, |v, cx| v.stop_compare(cx)))).child("Stop comparing"))
                 .into_any_element(),
         );
-        let sm = d.summary();
+        let m = d.head.clone();
+        let zoomed = s.scope != m.root();
+        let narrowed = zoomed && s.scoped;
+        let visible = &s.visible;
+        let mut sm = [0usize; 3];
+        for &i in visible {
+            sm[match d.changes[i].status {
+                Status::Added => 0,
+                Status::Changed => 1,
+                Status::Removed => 2,
+            }] += 1;
+        }
         body.push(
             div()
                 .flex()
@@ -793,19 +814,62 @@ impl Inspector {
                 .mb(px(10.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_size(px(12.5))
-                .child(div().text_color(ui.added).child(format!("{} added", sm.added)))
-                .child(div().text_color(ui.changed).child(format!("{} changed", sm.changed)))
-                .child(div().text_color(ui.removed).child(format!("{} removed", sm.removed)))
+                .child(div().text_color(ui.added).child(format!("{} added", sm[0])))
+                .child(div().text_color(ui.changed).child(format!("{} changed", sm[1])))
+                .child(div().text_color(ui.removed).child(format!("{} removed", sm[2])))
                 .into_any_element(),
         );
-        if d.changes.is_empty() {
-            body.push(self.doc(if d.files.is_empty() { "No block of the analyzed code changed." } else { "No block of the analyzed code changed; the files changed are listed below." }));
+        // What the list is limited to, and the switch to see everything.
+        if zoomed {
+            let on = s.scoped;
+            let name = crate::scope::scope_name(&m, s.scope);
+            body.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(10.0))
+                    .mb(px(8.0))
+                    .text_size(px(12.0))
+                    .text_color(ui.muted)
+                    .child(div().flex().min_w_0().truncate().child(if on { "In ".to_string() } else { "Everywhere".to_string() }).when(on, |d| d.child(div().ml(px(4.0)).text_color(ui.ink).font_weight(FontWeight::SEMIBOLD).truncate().child(name))))
+                    .child(
+                        div()
+                            .id("only-in-view")
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(5.0))
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |this, _, _, cx| this.act(cx, move |v, cx| v.set_scoped(!on, cx))))
+                            .child(div().size(px(13.0)).rounded(px(3.0)).border_1().border_color(if on { ui.accent } else { ui.line_strong }).bg(if on { ui.accent } else { ui.panel }).flex().items_center().justify_center().when(on, |d| d.child(crate::shell::ico("check", 10.0, ui.on_strong))))
+                            .child("Only in view"),
+                    )
+                    .into_any_element(),
+            );
+        }
+        let elsewhere = d.changes.len() - visible.len();
+        if !visible.is_empty() {
+            body.push(div().mb(px(10.0)).flex().flex_wrap().items_center().gap(px(4.0)).text_color(ui.muted).line_height(px(19.5)).child("In the order the diagram reads. Click a change to unfold it, double-click to zoom to it;").child(kbd("N", &ui)).child("and").child(kbd("P", &ui)).child("step through them.").into_any_element());
+        } else if narrowed && elsewhere > 0 {
+            body.push(
+                div()
+                    .mb(px(10.0))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(5.0))
+                    .text_color(ui.muted)
+                    .child(format!("No changes in this part; {elsewhere} elsewhere."))
+                    .child(div().id("show-all-changes").text_color(ui.accent).cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.act(cx, |v, cx| v.set_scoped(false, cx)))).child("Show all"))
+                    .into_any_element(),
+            );
         } else {
-            body.push(div().mb(px(10.0)).flex().flex_wrap().items_center().gap(px(4.0)).text_color(ui.muted).line_height(px(19.5)).child("In the order the diagram reads. Press").child(kbd("N", &ui)).child("and").child(kbd("P", &ui)).child("to step through them.").into_any_element());
+            body.push(self.doc(if d.files.is_empty() { "No block of the analyzed code changed." } else { "No block of the analyzed code changed; the files changed are listed below." }));
         }
         // Grouped by file, in the order the diagram reads.
         let mut groups: Vec<(String, Option<char>, Vec<(usize, crate::diff::Change, crate::diff::ChangeInfo)>)> = vec![];
-        for (i, ch) in d.changes.iter().enumerate() {
+        for &i in visible {
+            let ch = &d.changes[i];
             let info = describe_change(&d, ch);
             let file = info.file.clone().unwrap_or_default();
             let at = match groups.iter().position(|g| g.0 == file) {
@@ -818,37 +882,119 @@ impl Inspector {
             };
             groups[at].2.push((i, *ch, info));
         }
+        let current = s.marked.or(s.change_index);
         for (file, mark, items) in &groups {
-            let rows: Vec<_> = items
-                .iter()
-                .map(|(i, ch, info)| {
-                    let sign = match ch.status {
-                        Status::Added => "+",
-                        Status::Changed => "~",
-                        Status::Removed => "−",
-                    };
-                    let name = format!("{sign}  {}{}", info.context.as_ref().map(|c| format!("{c} › ")).unwrap_or_default(), info.name);
-                    UseRow { id: *i as u32, name, dim: Some(format!(" · {}", info.kind.to_lowercase())), at: info.line.map(|l| l.to_string()), current: s.change_index == Some(*i), peek: Some(ch.at) }
-                })
-                .collect();
-            if items.iter().any(|(i, _, _)| s.change_index == Some(*i)) && reveal.is_none() {
+            if items.iter().any(|(i, _, _)| current == Some(*i)) && reveal.is_none() {
                 *reveal = Some(body.len());
             }
-            let list = self.uses(rows, cx, |v, i, cx| v.go_to_change(i as usize, cx));
+            let mut rows: Vec<AnyElement> = vec![];
+            for (k, (i, ch, info)) in items.iter().enumerate() {
+                let i = *i;
+                let open = s.marked == Some(i);
+                let sign = match ch.status {
+                    Status::Added => "+",
+                    Status::Changed => "~",
+                    Status::Removed => "−",
+                };
+                let name = format!("{sign}  {}{}", info.context.as_ref().map(|c| format!("{c} › ")).unwrap_or_default(), info.name);
+                let (hover, peek) = (ui.hover, ch.at);
+                let mut item = div().flex().flex_col().when(k > 0, |d| d.border_t_1().border_color(ui.line));
+                item = item.child(
+                    div()
+                        .id(("change", i))
+                        .group("change-row")
+                        .flex()
+                        .items_center()
+                        .when(current == Some(i), |d| d.bg(ui.accent_bg).border_l_2().border_color(ui.accent))
+                        .hover(move |s| s.bg(hover))
+                        .on_hover(cx.listener(move |this, h: &bool, _, cx| {
+                            let target = if *h { Some(peek) } else { None };
+                            this.act(cx, move |v, cx| v.peek(target, cx));
+                        }))
+                        .child(
+                            div()
+                                .id(("change-main", i))
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .justify_between()
+                                .items_baseline()
+                                .gap(px(10.0))
+                                .pl(px(9.0))
+                                .py(px(5.0))
+                                .cursor_pointer()
+                                // The first click of a double click only marks; the second does not undo it.
+                                .on_click(cx.listener(move |this, e: &gpui::ClickEvent, _, cx| {
+                                    let double = e.click_count() >= 2;
+                                    this.act(cx, move |v, cx| {
+                                        if double {
+                                            v.mark_change(Some(i), cx);
+                                            v.go_to_change(i, cx);
+                                        } else {
+                                            let next = if v.marked == Some(i) { None } else { Some(i) };
+                                            v.mark_change(next, cx);
+                                        }
+                                    });
+                                }))
+                                .child(div().flex().min_w_0().truncate().font_weight(FontWeight(550.0)).child(name).child(div().font_weight(FontWeight::NORMAL).text_color(ui.faint).child(format!(" · {}", info.kind.to_lowercase()))))
+                                .when_some(info.line, |d, l| d.child(div().flex_none().font_family(MONO_FONT).text_size(px(11.0)).text_color(ui.faint).child(l.to_string()))),
+                        )
+                        .child(
+                            icon_button(("zoom-to", i), "crosshair", 13.0, 26.0, "Zoom to it", &ui, true)
+                                .mr(px(4.0))
+                                .when(!open, |d| d.invisible())
+                                .group_hover("change-row", |s| s.visible())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.act(cx, move |v, cx| {
+                                        v.mark_change(Some(i), cx);
+                                        v.go_to_change(i, cx);
+                                    })
+                                })),
+                        ),
+                );
+                if open {
+                    let mut code: Vec<AnyElement> = vec![];
+                    let mut unused = None;
+                    self.change_code(&d, *ch, &mut code, &mut unused, cx);
+                    item = item.child(div().px(px(8.0)).pb(px(8.0)).border_t_1().border_color(ui.line).bg(ui.code_gap).children(code));
+                }
+                rows.push(item.into_any_element());
+            }
             body.push(
                 div()
                     .my(px(10.0))
                     .child(div().flex().items_center().gap(px(6.0)).mb(px(5.0)).font_family(MONO_FONT).text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).when_some(*mark, |dv, m| dv.child(self.file_mark_el(m))).child(if file.is_empty() { "Repository".to_string() } else { file.clone() }))
-                    .child(list)
+                    .child(div().flex().flex_col().border_1().border_color(ui.line).rounded(px(8.0)).overflow_hidden().children(rows))
                     .into_any_element(),
             );
         }
-        let listed: HashSet<&str> = groups.iter().map(|g| g.0.as_str()).collect();
-        let others: Vec<_> = d.files.iter().filter(|f| !listed.contains(f.path.as_str()) && !f.previous.as_deref().is_some_and(|p| listed.contains(p))).collect();
+        // Files changed without changing a block of the analyzed code, within the scope too.
+        let listed: HashSet<String> = d.changes.iter().filter_map(|c| describe_change(&d, c).file).collect();
+        let rest: Vec<_> = d.files.iter().filter(|f| !listed.contains(f.path.as_str()) && !f.previous.as_deref().is_some_and(|p| listed.contains(p))).cloned().collect();
+        let others: Vec<crate::compare::FileChange> = if narrowed { crate::scope::files_in(&m, &rest, s.scope).into_iter().cloned().collect() } else { rest };
         if !others.is_empty() {
             let rows = others.iter().map(|f| div().flex().items_center().truncate().child(self.file_mark_el(file_mark(f.status))).child(format!("{}{}", f.previous.as_ref().map(|p| format!("{p} → ")).unwrap_or_default(), f.path)));
             body.push(div().my(px(10.0)).child(self.label("ALSO CHANGED", Some(others.len()))).child(div().flex().flex_col().gap(px(3.0)).font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.muted).children(rows)).into_any_element());
         }
+    }
+
+    /// A change's code, as the details panel shows it: the lines it removed and added.
+    fn change_code(&mut self, d: &Rc<SceneDiff>, c: crate::diff::Change, body: &mut Vec<AnyElement>, reveal: &mut Option<usize>, cx: &mut Context<Self>) {
+        if c.status == Status::Removed {
+            let model = d.base.clone();
+            if let Some(span) = model.node(c.id).span.clone().filter(|sp| model.file_text(sp.file).is_some()) {
+                self.diff_view(Some((&model, &span)), None, None, None, None, body, reveal, cx);
+            }
+            return;
+        }
+        let m = d.head.clone();
+        let node = m.node(c.id);
+        let Some(view) = m.source_view(node).filter(|v| m.file_text(v.span.file).is_some()) else { return };
+        let root_span = m.node(view.root).span.clone().unwrap_or(view.span.clone());
+        let base_span = d.base_of(view.root).and_then(|b| d.base.node(b).span.clone()).filter(|sp| d.base.file_text(sp.file).is_some());
+        let marked = node.span.as_ref().filter(|_| view.root != c.id).map(|sp| (sp.line, sp.end_line));
+        let base = d.base.clone();
+        self.diff_view(base_span.as_ref().map(|sp| (&base, sp)), Some((&m, &root_span)), marked, None, Some(view.root), body, reveal, cx);
     }
 
     fn file_mark_el(&self, m: char) -> AnyElement {

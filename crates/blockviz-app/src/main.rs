@@ -16,6 +16,7 @@ mod export;
 mod git;
 mod gpuipen;
 mod history;
+mod hook;
 mod icons;
 mod input;
 mod linediff;
@@ -26,6 +27,8 @@ mod model;
 mod panel;
 mod pen;
 mod render;
+mod request;
+mod scope;
 mod settings;
 mod shell;
 mod svgpen;
@@ -36,8 +39,42 @@ mod trace;
 mod viewer;
 
 use gpui::{px, size, App, AppContext, Application, Bounds, WindowBounds, WindowOptions};
+use request::Request;
 use std::path::PathBuf;
 use viewer::Viewer;
+
+/// `hook`: shows a commit the coding agent is about to make. `hook claude` reads Claude Code's PreToolUse
+/// input from stdin and answers it; `hook --command "<shell command>" [--cwd <dir>]` takes the command
+/// directly, for agents whose hooks pass it another way, and prints nothing.
+fn hook(args: &[String]) {
+    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    let claude = args.first().is_some_and(|a| a == "claude");
+    let (command, cwd) = match value("--command") {
+        Some(c) => (c, value("--cwd").map(PathBuf::from).or_else(|| std::env::current_dir().ok()).unwrap_or_default()),
+        None => {
+            let mut input = String::new();
+            let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
+            match hook::claude_command(&input) {
+                Some((c, d)) if claude => (c, PathBuf::from(d)),
+                _ => return,
+            }
+        }
+    };
+    let Some(launch) = hook::launch_for(&command, &cwd) else { return };
+    let Some(repo) = git::Repo::find(&launch.folder) else { return };
+    // The window outlives this hook, and the agent does not wait for it.
+    let mut app = std::process::Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("blockviz-app")));
+    app.arg(repo.root()).args(["--compare", launch.compare]);
+    if let Some(t) = &launch.title {
+        app.args(["--title", t]);
+    }
+    app.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut app, 0);
+    if app.spawn().is_ok() && claude {
+        println!("{}", hook::CLAUDE_ASK);
+    }
+}
 
 /// Draws a view of `folder` into an SVG, without a window.
 fn draw_svg(folder: &std::path::Path, out: &str, at: Option<&str>, dark: bool, (w, h): (f64, f64)) {
@@ -91,7 +128,12 @@ fn main() {
     let svg = value("--svg");
     let at = value("--at");
     let sized = value("--size");
-    let flags_with_values = [svg.as_ref(), at.as_ref(), sized.as_ref()];
+    let compare = value("--compare");
+    let title = value("--title");
+    if args.first().is_some_and(|a| a == "hook") {
+        return hook(&args[1..]);
+    }
+    let flags_with_values = [svg.as_ref(), at.as_ref(), sized.as_ref(), compare.as_ref(), title.as_ref()];
     let folder = args.iter().find(|a| !a.starts_with("--") && !flags_with_values.contains(&Some(*a))).map(PathBuf::from);
 
     if let Some(out) = svg {
@@ -99,6 +141,17 @@ fn main() {
         let (w, h) = sized.and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or((1440.0, 900.0));
         return draw_svg(&folder, &out, at.as_deref(), args.iter().any(|a| a == "--dark"), (w, h));
     }
+
+    // Opening a repository while the app is running shows it there, and raises that window.
+    let request = folder.map(|f| Request { repo: f.canonicalize().unwrap_or(f).to_string_lossy().to_string(), compare, title });
+    #[cfg(unix)]
+    let incoming = {
+        let socket = request::socket_path();
+        if request.as_ref().is_some_and(|r| request::send(&socket, r)) {
+            return;
+        }
+        request::serve(&socket).ok()
+    };
 
     Application::new().with_assets(icons::Icons).run(move |cx: &mut App| {
         input::bind_keys(cx);
@@ -117,16 +170,40 @@ fn main() {
         .detach();
         let bounds = Bounds::centered(None, size(px(1440.0), px(900.0)), cx);
         let options = WindowOptions { window_bounds: Some(WindowBounds::Windowed(bounds)), ..Default::default() };
-        cx.open_window(options, |window, cx| {
-            cx.new(|cx| {
-                let mut v = Viewer::new(window, cx);
-                if let Some(f) = folder {
-                    v.open_folder(f, cx);
-                }
-                v
+        let window = cx
+            .open_window(options, |window, cx| {
+                cx.new(|cx| {
+                    let mut v = Viewer::new(window, cx);
+                    if let Some(r) = request {
+                        v.open_request(r, cx);
+                    }
+                    v
+                })
             })
-        })
-        .unwrap();
+            .unwrap();
+        // Requests from other launches arrive on a thread of their own, and are handled here.
+        #[cfg(unix)]
+        if let Some(incoming) = incoming {
+            let (tx, mut rx) = futures::channel::mpsc::unbounded::<Request>();
+            std::thread::spawn(move || {
+                for r in incoming {
+                    if tx.unbounded_send(r).is_err() {
+                        break;
+                    }
+                }
+            });
+            cx.spawn(async move |cx| {
+                use futures::StreamExt;
+                while let Some(r) = rx.next().await {
+                    let _ = window.update(cx, |v, window, cx| {
+                        v.open_request(r, cx);
+                        window.activate_window();
+                    });
+                    let _ = cx.update(|cx| cx.activate(true));
+                }
+            })
+            .detach();
+        }
         cx.activate(true);
     });
 }

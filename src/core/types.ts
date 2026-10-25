@@ -82,15 +82,26 @@ export interface Project { name: string; files: InputFile[]; source: string; des
 /** How a file differs between the two versions compared. */
 export type FileChange = { path: string; status: 'added' | 'removed' | 'modified' | 'renamed'; previous?: string };
 
+/** How a local repository is compared: a branch against its base, two exact revisions, or the working tree against HEAD. */
+export type GitMode = 'branch' | 'refs' | 'worktree';
+
+/** A commit of a local repository, with the branches and tags on it (and `HEAD`, if checked out). */
+export interface Commit { sha: string; short: string; subject: string; author: string; date: string; refs: string[]; parents: string[] }
+
+/** Which of two revisions comes first in history: a diff from a later one to an earlier one runs backwards. */
+export interface CommitOrder { baseSha: string; headSha: string; baseIsAncestorOfHead: boolean; headIsAncestorOfBase: boolean }
+
 /** What two versions of a repository are: a pull request, or two branches compared. */
 export interface CompareInfo {
-  kind: 'pr' | 'compare';
-  /** `owner/repo`. */
+  kind: 'pr' | 'compare' | 'local';
+  /** For a local repository: titled `base...head`, `base..head` or `working tree vs HEAD`. */
+  mode?: GitMode;
+  /** `owner/repo`, or a local repository's path. */
   repo: string;
   number?: number;
   /** The pull request's title, or `base...head`. */
   title: string;
-  /** The comparison on GitHub. */
+  /** The comparison on GitHub; empty for a local repository. */
   url: string;
   /** `open`, `closed` or `merged` for a pull request. */
   state?: string;

@@ -1,5 +1,5 @@
 import { Camera, type CameraState, type Framing, type Plan } from './camera';
-import { clamp, type Insets, type Xf } from './geometry';
+import { clamp, panToReveal, type Insets, type Xf } from './geometry';
 import type { SceneDiff } from './diff';
 import type { SceneModel } from './model';
 import { Renderer, type EdgeHit, type Paint, type Trace } from './renderer';
@@ -150,6 +150,23 @@ export class Engine {
     const seen = this.renderer.hits.some(h => h.id === id && h.clear
       && h.box.x >= i.left && h.box.y >= i.top && h.box.x + h.box.w <= this.width - i.right && h.box.y + h.box.h <= this.height - i.bottom);
     if (!seen) this.flyTo(path);
+  }
+
+  /** Pans, without zooming, just far enough that a block is in view; a block outside what the camera is anchored in is flown to. Not a step in the history. */
+  revealNode(id: number) {
+    const target = this.model.canonicalPath(id);
+    const here = this.camera.path;
+    if (target.length < here.length || !here.every((p, k) => target[k] === p)) return this.flyToNode(id);
+    if (target.length === here.length) return;
+    const b = this.camera.boxIn(target, here.length - 1);
+    const { x, y, s } = this.camera.xf;
+    const { dx, dy } = panToReveal({ x: x + b.x * s, y: y + b.y * s, w: b.w * s, h: b.h * s }, this.width, this.height, this.camera.insets);
+    if (!dx && !dy) return;
+    this.animate({
+      duration: 260,
+      length: 0,
+      step: t => { this.camera.xf = { x: x + dx * t, y: y + dy * t, s }; },
+    }, false);
   }
 
   /** Screen margins covered by overlays, kept clear when framing. */

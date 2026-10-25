@@ -260,6 +260,7 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .change-refs code { font: 11.5px var(--mono); color: var(--muted); background: var(--chip); padding: 1px 5px; border-radius: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .change-refs a { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); text-decoration: none; margin-left: auto; }
 .change-refs a:hover { text-decoration: underline; }
+.change-refs .dim { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .change-summary { display: flex; gap: 12px; margin: 0 0 10px; font-weight: 600; font-size: 12.5px; }
 .change-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 6px; color: var(--muted); }
 .change-badge { padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 650; }
@@ -273,7 +274,20 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 button.link { color: var(--accent); font-weight: 500; }
 button.link:hover { text-decoration: underline; }
 .change-mark { display: inline-block; width: 1.3ch; margin-right: 5px; font: 700 12px var(--mono); }
-.uses.changes button[aria-current="true"] { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
+.uses.changes .change-item { border-top: 1px solid var(--line); }
+.uses.changes .change-item:first-child { border-top: 0; }
+.uses.changes button { border-top: 0; }
+.change-row { display: flex; align-items: stretch; }
+.change-row .change-main { flex: 1; min-width: 0; }
+.change-zoom { flex: none; width: 26px; height: auto; border-radius: 0; opacity: 0; }
+.change-row:hover .change-zoom, .change-zoom:focus-visible, .change-main[aria-expanded="true"] + .change-zoom { opacity: 1; }
+@media (pointer: coarse) { .change-zoom { opacity: 1; } }
+.change-code { padding: 6px 8px 8px; border-top: 1px dashed var(--line); background: var(--code-bg); overflow-x: auto; }
+.change-scope { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.change-scope span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-scope strong { color: var(--ink); font-weight: 600; }
+.change-scope label { display: inline-flex; align-items: center; gap: 5px; flex: none; cursor: pointer; }
+.uses.changes .change-main[aria-current="true"] { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
 .change-file { display: flex; align-items: center; gap: 6px; text-transform: none !important; letter-spacing: 0 !important; font: 500 11.5px var(--mono) !important; color: var(--muted) !important; }
 .file-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 3px; font: 700 10px var(--ui); color: var(--on-strong); flex: none; margin-right: 6px; }
 .change-file .file-mark { margin-right: 0; }
@@ -300,7 +314,7 @@ button.link:hover { text-decoration: underline; }
 .pr-path { color: var(--faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-empty { padding: 18px; color: var(--faint); text-align: center; }
 
-.open-dialog { width: min(620px, calc(100vw - 32px)); max-height: 100%; overflow: auto; overscroll-behavior: contain; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-large); padding: 20px 22px 22px; }
+.open-dialog { width: min(620px, calc(100vw - 32px)); max-height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-large); padding: 20px 22px 22px; }
 .open-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .open-dialog h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: -0.2px; }
 .open-dialog header p { margin: 0 0 16px; color: var(--muted); }
@@ -314,6 +328,71 @@ button.link:hover { text-decoration: underline; }
 .open-options button:hover { background: var(--hover); border-color: var(--line-strong); color: var(--ink); }
 .open-options strong { display: block; color: var(--ink); font-weight: 600; font-size: 12.5px; }
 .open-options small { display: block; color: var(--faint); font-size: 11.5px; margin-top: 1px; }
+/* The local git section: spacing on a 4/8/12 scale; every grid child may shrink (min-width: 0), so nothing widens the dialog. */
+.git { margin-top: 12px; display: grid; gap: 8px; min-width: 0; }
+.git form { display: grid; gap: 12px; min-width: 0; }
+.git-choose { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
+.git-choose:hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); color: var(--ink); }
+.git-choose strong { display: block; color: var(--ink); font-weight: 600; font-size: 12.5px; }
+.git-choose small { display: block; color: var(--faint); font-size: 11.5px; margin-top: 1px; }
+.git-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.git-recent button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--muted); }
+.git-recent button:hover { background: var(--hover); color: var(--ink); }
+.git .link { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; }
+.git .link:hover { text-decoration: underline; }
+.git-hint { margin: 0; font-size: 12.5px; color: var(--faint); }
+.git-error { margin: 0; font-size: 12.5px; color: var(--removed); }
+.git .open-row button:not(.primary) { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); }
+.git-repo { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 12.5px; }
+.git-repo svg { flex: none; }
+.git-repo strong { flex: none; color: var(--ink); font-weight: 600; }
+/* A long path is cut at its start, so the folder stays in sight. */
+.git-repo small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--faint); font-size: 11.5px; }
+.git-repo .link { flex: none; }
+.segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--chip); }
+.segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 5px 8px; border-radius: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.segmented button:hover { color: var(--ink); }
+.segmented button[aria-pressed="true"] { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
+.segmented .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--changed); flex: none; }
+.git-refs { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; }
+.git-refs label { display: grid; gap: 4px; min-width: 0; font-size: 11.5px; color: var(--faint); }
+.git-refs select { min-width: 0; width: 100%; height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 0 8px; font: 12.5px var(--mono); color: var(--ink); background: none; }
+/* Beside the picker buttons, not the labels above them. */
+.git-swap, .git-arrow { height: 32px; display: inline-flex; align-items: center; justify-content: center; }
+.git-arrow { width: 30px; color: var(--faint); }
+.git-swap .narrow { display: none; }
+.git-note { margin: 0; font-size: 12.5px; color: var(--muted); }
+.git-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.git-notice { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--changed-bg); color: var(--ink); font-size: 12px; }
+.git-notice svg { flex: none; color: var(--changed); }
+.git-notice span { min-width: 0; }
+.git-notice .link { flex: none; margin-left: auto; }
+.git-notice.error { background: var(--error-bg); }
+.git-notice.error svg { color: var(--removed); }
+.ref-picker { position: relative; min-width: 0; }
+.ref-value { display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; min-width: 0; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 8px; text-align: left; color: var(--muted); }
+.ref-value:hover, .ref-value[aria-expanded="true"] { border-color: var(--accent); }
+.ref-value code { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12.5px var(--mono); color: var(--ink); }
+.ref-kind, .ref-chevron { flex: none; color: var(--faint); }
+.ref-chevron { margin-left: auto; }
+.ref-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 12px; }
+/* Floats over the dialog (a portal, positioned from the button), so it is never clipped by it. */
+.ref-menu { position: fixed; z-index: 40; display: flex; flex-direction: column; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow-large); overflow: hidden; }
+.ref-menu input { flex: none; width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--line); padding: 9px 12px; font-size: 12.5px; color: var(--ink); background: none; outline: none; }
+.ref-menu [role="listbox"] { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px; }
+.ref-group { padding: 8px 8px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--faint); }
+.ref-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.ref-row[aria-selected="true"] { background: var(--hover); }
+.ref-row .ref-sha { flex: none; width: 8ch; font: 12px var(--mono); color: var(--faint); }
+.ref-row.named .ref-sha { margin-left: auto; width: auto; }
+.ref-row .ref-subject { color: var(--ink); }
+.ref-row small { flex: none; margin-left: auto; padding-left: 4px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.ref-badge { flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; border-radius: 999px; background: var(--chip); color: var(--chip-ink); font: 11px/17px var(--mono); }
+.ref-badge.branch { color: var(--accent); }
+.ref-badge.head { color: var(--faint); }
+.ref-use { color: var(--ink); flex: none; }
+.ref-all { margin: 4px 8px; }
+.ref-none { margin: 0; padding: 10px; font-size: 12.5px; color: var(--faint); }
 .paste { display: grid; gap: 8px; margin-top: 12px; }
 .paste input, .paste textarea { border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; font: 12.5px var(--mono); outline: none; }
 .paste textarea { min-height: 200px; resize: vertical; }
@@ -349,6 +428,12 @@ button.link:hover { text-decoration: underline; }
   /* Dialogs sit near the top, clear of the on-screen keyboard. */
   .scrim { padding: 12px; }
   .open-dialog { width: 100%; padding: 16px; }
+  /* Pickers stack, and the swap turns to point up and down. */
+  .git-refs { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .git-swap, .git-arrow { justify-self: center; }
+  .git-swap .wide { display: none; }
+  .git-swap .narrow { display: block; }
+  .git-actions { flex-wrap: wrap; }
 }
 /* Fingers: bigger targets, and fields large enough that iOS doesn't zoom into them. */
 @media (pointer: coarse) {
@@ -361,7 +446,7 @@ button.link:hover { text-decoration: underline; }
   .uses button { padding: 9px 10px; }
   .palette-results button { padding: 10px; }
   .open-options button { padding: 12px; }
-  .palette-input input, .open-row input, .paste input, .paste textarea { font-size: 16px; }
+  .palette-input input, .open-row input, .git-refs select, .ref-menu input, .paste input, .paste textarea { font-size: 16px; }
   .insp-resize { left: -12px; width: 24px; }
   .insp-resize::after { left: 10px; opacity: 1; }
 }
