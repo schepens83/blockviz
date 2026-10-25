@@ -419,6 +419,20 @@ impl<'a> Lower<'a> {
                 return vec![Stmt::For(StmtFor { target: Box::new(store(target)), iter: Box::new(iter), body, orelse: vec![], kind: ForKind::In, is_async: false, range: r })];
             }
         }
+        // `NotifyJob.perform_later(c)` runs the job's `perform(c)` in the background,
+        // as Go's `go f()` does.
+        if let (Some(recv), "perform_later") = (c.receiver(), method.as_str()) {
+            if constant_text(&recv).is_some() {
+                let job = self.expr(&recv);
+                let (pos, keywords) = self.arguments(&args);
+                let message = c.message_loc().map(|m| range(&m)).unwrap_or(r);
+                let instance = Expr::Call(ExprCall { func: Box::new(job), arguments: Arguments::default(), kind: CallKind::New, range: nrange(&recv) });
+                let perform = Expr::Attribute(ExprAttribute { value: Box::new(instance), attr: "perform".into(), range: TextRange::new(r.start(), message.end()) });
+                let call = Expr::Call(ExprCall { func: Box::new(perform), arguments: Arguments { args: pos, keywords }, kind: CallKind::Call, range: r });
+                let go = WithItem { context_expr: name("go", TextRange::empty(r.start())), optional_vars: None, range: r };
+                return vec![Stmt::With(StmtWith { items: vec![go], body: vec![Stmt::Expr(StmtExpr { value: Box::new(call), range: r })], is_async: false, range: r })];
+            }
+        }
         // `x.y = v` and `x[k] = v` are stores.
         if c.is_attribute_write() || method == "[]=" {
             let Some(recv) = c.receiver() else { return vec![] };

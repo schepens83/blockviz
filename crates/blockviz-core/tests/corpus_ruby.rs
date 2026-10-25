@@ -316,3 +316,19 @@ fn lobsters_actions_end_in_their_responses() {
         }
     }
 }
+
+#[test]
+fn lobsters_queries_and_jobs() {
+    let s = repo("lobsters");
+    // `NotifyCommentJob.perform_later(@comment)` runs the job's `perform` in the background.
+    let comments = file(&s, "app/controllers/comments_controller.rb");
+    let job = def(&s, file(&s, "app/jobs/notify_comment_job.rb"), "NotifyCommentJob");
+    let perform = def(&s, job, "perform");
+    let step = descendants(&s, def(&s, comments, "create")).into_iter().find(|n| n.reference == Some(perform.id)).expect("perform_later step");
+    assert!(step.badges.contains(&"in background".to_string()), "{:?}", step.badges);
+    // Queries through a model are database steps, a chain one step named by what runs it.
+    let story = def(&s, file(&s, "app/models/story.rb"), "Story");
+    let db: Vec<&Node> = descendants(&s, story).into_iter().filter(|n| n.effects.iter().any(|e| e == "database") && n.kind != Kind::Function).collect();
+    assert!(!db.is_empty());
+    assert!(!db.iter().any(|n| n.title == "where"), "a chain is one step");
+}

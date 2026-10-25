@@ -419,3 +419,16 @@ pub fn response(e: &Expr, src: &str) -> Option<(String, String)> {
         _ => return None,
     })
 }
+
+/// Active Record's methods that query or change the database.
+pub fn is_query(method: &str) -> bool {
+    matches!(
+        method,
+        "find" | "find_by" | "find_by!" | "find_by_sql" | "find_each" | "find_in_batches" | "find_or_create_by" | "find_or_create_by!" | "find_or_initialize_by" | "first" | "first!" | "last" | "last!" | "take" | "take!" | "sole" | "where" | "all" | "pluck" | "pick" | "ids" | "count" | "sum" | "average" | "minimum" | "maximum" | "exists?" | "create" | "create!" | "insert_all" | "upsert_all" | "update" | "update!" | "update_all" | "update_column" | "update_columns" | "update_attribute" | "save" | "save!" | "destroy" | "destroy!" | "destroy_all" | "delete" | "delete_all" | "touch" | "increment!" | "decrement!" | "toggle!" | "reload" | "lock!" | "with_lock" | "transaction" | "load" | "load_async"
+    )
+}
+
+/// An Active Record model: what the front end badged `DB table` or `abstract`.
+pub fn is_table(c: &ClassDef) -> bool {
+    c.decorators.iter().any(|d| matches!(&d.expression, Expr::Call(x) if matches!(&*x.func, Expr::Name(n) if n.id == "badge") && x.arguments.args.first().and_then(literal).is_some_and(|b| b == "DB table" || b == "abstract")))
+}

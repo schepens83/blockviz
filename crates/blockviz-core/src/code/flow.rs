@@ -2763,7 +2763,7 @@ impl<'c, 'p> Fb<'c, 'p> {
     fn with_stmt(&mut self, with: &'p ast::StmtWith, later: Later) {
         let (items, body) = (&with.items[..], &with.body[..]);
         // Go's `go f()` and `defer f()`: the steps run, marked with when.
-        if let ([item], Lang::Go) = (items, self.m.lang) {
+        if let ([item], Lang::Go | Lang::Ruby) = (items, self.m.lang) {
             if let Expr::Name(n) = &item.context_expr {
                 let when = match n.id.as_str() {
                     "go" => Some("in background"),
@@ -3299,6 +3299,29 @@ impl<'c, 'p> Fb<'c, 'p> {
     /// database, unless the receiver is an import from a library that is not
     /// one (Flask's cookie `session`).
     fn is_database(&self, a: &ast::ExprAttribute) -> bool {
+        // Active Record: a query or a change through a model, its class or a
+        // record (`User.find_by(…)`, `Story.where(…).first`, `@story.save`).
+        if self.m.lang == Lang::Ruby {
+            if !crate::ruby::rails::is_query(&a.attr) {
+                return false;
+            }
+            let mut cur: &Expr = &a.value;
+            loop {
+                if let Ty::Class(k) | Ty::Inst(k) = self.ty(cur) {
+                    if crate::ruby::rails::is_table(self.cx.ix.classes[k].def) {
+                        return true;
+                    }
+                }
+                cur = match cur {
+                    Expr::Call(c) => match &*c.func {
+                        Expr::Attribute(x) => &x.value,
+                        _ => return false,
+                    },
+                    Expr::Attribute(x) => &x.value,
+                    _ => return false,
+                };
+            }
+        }
         // Whatever the receiver, the method must be one that queries or
         // changes data: asked first, it spares the rest for most calls.
         if !vocabulary::is_database_verb(a.attr.as_str()) {
