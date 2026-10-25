@@ -9,6 +9,7 @@ use crate::diff::{describe_change, SceneDiff, Status};
 use crate::linediff::{diff_lines, fold, OpKind, Row};
 use crate::model::Model;
 use crate::render::EdgeId;
+use crate::scrollbar::Scrollbar;
 use crate::shell::{ico, icon_button, kbd};
 use crate::theme::{mono_font, Ui, UI_FONT};
 use crate::viewer::Viewer;
@@ -122,6 +123,9 @@ pub struct Inspector {
     state: Option<PanelState>,
     all_uses: bool,
     scroll: ScrollHandle,
+    /// The scrollbars of the body (following `scroll`) and of the entries box.
+    bar: Scrollbar,
+    rows_bar: Scrollbar,
     /// Syntax runs of the files shown so far, by model and file.
     runs: HashMap<(usize, u32), Rc<Vec<u32>>>,
     /// The child last scrolled into view, for what was shown.
@@ -132,7 +136,8 @@ pub struct Inspector {
 
 impl Inspector {
     pub fn new(viewer: WeakEntity<Viewer>, ui: Ui) -> Self {
-        Inspector { viewer, ui, text: 1.0, state: None, all_uses: false, scroll: ScrollHandle::new(), runs: HashMap::new(), revealed: None, unfolded: HashSet::new() }
+        let bar = Scrollbar::new();
+        Inspector { viewer, ui, text: 1.0, state: None, all_uses: false, scroll: bar.handle.clone(), bar, rows_bar: Scrollbar::new(), runs: HashMap::new(), revealed: None, unfolded: HashSet::new() }
     }
 
     pub fn set(&mut self, state: Option<PanelState>, cx: &mut Context<Self>) {
@@ -145,6 +150,7 @@ impl Inspector {
             self.all_uses = false;
             self.unfolded.clear();
             self.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
+            self.rows_bar.handle.set_offset(gpui::point(px(0.0), px(0.0)));
             self.revealed = None;
         }
         if let Some(s) = &state {
@@ -162,6 +168,12 @@ impl Inspector {
     #[cfg(test)]
     pub fn content(&self) -> Content {
         self.state.as_ref().map_or(Content::None, |s| s.content.clone())
+    }
+
+    /// The body's scrollbar.
+    #[cfg(test)]
+    pub fn bar(&self) -> Scrollbar {
+        self.bar.clone()
     }
 
     pub fn set_hover(&mut self, hover: Option<u32>, cx: &mut Context<Self>) {
@@ -648,7 +660,7 @@ impl Inspector {
                 div()
                     .my(px(10.0))
                     .child(self.label(format!("{} ENTRIES", node.rows.len()), None))
-                    .child(div().id("rows").max_h(px(260.0)).overflow_y_scroll().text_size(self.t(12.0)).border_1().border_color(ui.line).rounded(px(8.0)).px(px(8.0)).py(px(6.0)).children(rows))
+                    .child(div().relative().text_size(self.t(12.0)).border_1().border_color(ui.line).rounded(px(8.0)).child(div().id("rows").max_h(px(260.0)).overflow_y_scroll().track_scroll(&self.rows_bar.handle).pl(px(8.0)).pr(px(12.0)).py(px(6.0)).children(rows)).child(self.rows_bar.overlay(&ui)))
                     .into_any_element(),
             );
         }
@@ -1056,6 +1068,6 @@ impl Render for Inspector {
                 self.scroll.scroll_to_item(child);
             }
         }
-        panel.child(div().id("inspector-body").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll).px(px(16.0)).pt(px(14.0)).pb(px(16.0)).children(body))
+        panel.child(div().relative().flex_1().min_h_0().child(div().id("inspector-body").debug_selector(|| "inspector-body".into()).size_full().overflow_y_scroll().track_scroll(&self.scroll).px(px(16.0)).pt(px(14.0)).pb(px(16.0)).children(body)).child(self.bar.overlay(&ui)))
     }
 }

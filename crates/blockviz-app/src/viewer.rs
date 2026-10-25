@@ -75,6 +75,7 @@ pub struct Search {
     pub results: Vec<u32>,
     pub active: usize,
     pub scroll: gpui::ScrollHandle,
+    pub bar: crate::scrollbar::Scrollbar,
     pub _edits: Subscription,
 }
 
@@ -1400,7 +1401,8 @@ impl Viewer {
         });
         window.focus(&gpui::Focusable::focus_handle(input.read(cx), cx));
         self.menu = None;
-        self.dialog = Some(Dialog::Search(Search { input, query: String::new(), results: m.find(""), active: 0, scroll: gpui::ScrollHandle::new(), _edits: edits }));
+        let bar = crate::scrollbar::Scrollbar::new();
+        self.dialog = Some(Dialog::Search(Search { input, query: String::new(), results: m.find(""), active: 0, scroll: bar.handle.clone(), bar, _edits: edits }));
         cx.notify();
     }
 

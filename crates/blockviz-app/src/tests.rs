@@ -572,3 +572,53 @@ fn the_window_still_answers_after_a_resize_even_if_the_button_is_released_elsewh
     frame(cx);
     assert_eq!(view.read_with(cx, |v, _| v.selected), Some(id));
 }
+
+/// A panel whose source runs far past the window, with the forward block selected.
+fn long_panel(cx: &mut TestAppContext) -> (Entity<Viewer>, &mut VisualTestContext) {
+    sandbox_home();
+    cx.update(|cx| {
+        crate::input::bind_keys(cx);
+        crate::menus::bind(cx);
+    });
+    let long = format!("{MODEL_PY}{}", (0..400).map(|i| format!("# filler {i}\n")).collect::<String>());
+    let f = files(&[("model.py", &long), ("train.py", TRAIN_PY)]);
+    let m = model(&f);
+    let (view, cx) = cx.add_window_view(|window, cx| Viewer::new(window, cx));
+    view.update(cx, |v, cx| v.show(PathBuf::from("/tmp/t"), f, m, cx));
+    frame(cx);
+    view.update(cx, |v, cx| {
+        v.panel_w = crate::viewer::PANEL_W;
+        let id = titled(v, "model.py");
+        v.select(Some(id), Some(v.m.as_ref().unwrap().canonical_path(id)), cx);
+    });
+    frame(cx);
+    (view, cx)
+}
+
+#[gpui::test]
+fn a_long_panel_has_a_scrollbar_whose_thumb_drags_the_text(cx: &mut TestAppContext) {
+    let (view, cx) = long_panel(cx);
+    let bar = view.read_with(cx, |v, cx| v.inspector.read(cx).bar());
+    let body = cx.debug_bounds("inspector-body").expect("the body is drawn");
+    let max: f32 = bar.handle.max_offset().height.into();
+    assert!(max > 100.0, "the source is longer than the panel ({max})");
+    assert_eq!(f32::from(bar.handle.offset().y), 0.0);
+    // The thumb sits at the top of the strip along the right edge; take hold of it and pull down.
+    let x = body.right() - px(5.0);
+    let from = point(x, body.top() + px(8.0));
+    let to = point(x, from.y + px(60.0));
+    press(cx, from, 1);
+    assert!(bar.dragging());
+    drag_to(cx, to);
+    let scrolled = -f32::from(bar.handle.offset().y);
+    assert!(scrolled > 0.0, "dragging the thumb scrolled the text");
+    // Pulled over the other way, it follows back.
+    drag_to(cx, from);
+    assert!(-f32::from(bar.handle.offset().y) < scrolled);
+    release(cx, to, 1);
+    assert!(!bar.dragging());
+    // A click lower on the track jumps there, centering the thumb.
+    press(cx, point(x, body.bottom() - px(4.0)), 1);
+    release(cx, point(x, body.bottom() - px(4.0)), 1);
+    assert!(-f32::from(bar.handle.offset().y) > max * 0.9);
+}

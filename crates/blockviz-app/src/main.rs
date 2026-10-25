@@ -30,6 +30,7 @@ mod pen;
 mod render;
 mod request;
 mod scope;
+mod scrollbar;
 mod settings;
 mod shell;
 mod svgpen;

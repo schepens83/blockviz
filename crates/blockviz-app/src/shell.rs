@@ -937,7 +937,9 @@ impl Viewer {
             .max_h(px((self.height * 0.52) as f32))
             .overflow_y_scroll()
             .track_scroll(&s.scroll)
-            .p(px(6.0))
+            .py(px(6.0))
+            .pl(px(6.0))
+            .pr(px(12.0))
             .when(s.results.is_empty(), |d| d.child(div().p(px(18.0)).text_color(ui.faint).flex().justify_center().child("No matches")))
             .children(rows);
         Some(
@@ -971,7 +973,7 @@ impl Viewer {
                                 .child(s.input.clone())
                                 .child(kbd("esc", ui)),
                         )
-                        .child(list),
+                        .child(div().relative().child(list).child(s.bar.overlay(ui))),
                 )
                 .into_any_element(),
         )
