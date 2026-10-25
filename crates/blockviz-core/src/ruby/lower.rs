@@ -386,12 +386,24 @@ impl<'a> Lower<'a> {
         let r = range(&c.location());
         let method = text(&c.name());
         let args: Vec<Node<'_>> = c.arguments().map(|a| a.arguments().iter().collect()).unwrap_or_default();
+        // A Gemfile: `gem "x"` is a package the project depends on.
+        let gemfile = self.path.rsplit('/').next().is_some_and(|b| b == "Gemfile" || b == "gems.rb");
+        if gemfile && c.receiver().is_none() {
+            return match method.as_str() {
+                "gem" => args.first().and_then(string_value).map(|g| vec![Stmt::Import(StmtImport { names: vec![Alias { name: g, asname: Some("_".into()), range: r }], style: ModuleStyle::Path, resolved: None, declaration: false, range: r })]).unwrap_or_default(),
+                "group" | "platforms" | "install_if" | "source" if c.block().is_some() => self.block_body(c.block()),
+                _ => vec![],
+            };
+        }
         if c.receiver().is_none() {
             match method.as_str() {
                 "require" | "require_relative" | "load" | "autoload" => {
                     let spec = args.iter().rev().find_map(string_value);
                     if let Some(spec) = spec {
-                        let resolved = self.requires.resolve(self.path, &spec, method == "require_relative");
+                        let relative = method == "require_relative";
+                        let resolved = self.requires.resolve(self.path, &spec, relative);
+                        // A relative path is the project's even when it is missing.
+                        let spec = if relative && !spec.starts_with('.') { format!("./{spec}") } else { spec };
                         return vec![Stmt::Import(StmtImport { names: vec![Alias { name: spec, asname: Some("_".into()), range: r }], style: ModuleStyle::Path, resolved, declaration: false, range: r })];
                     }
                 }

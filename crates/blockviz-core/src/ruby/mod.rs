@@ -35,7 +35,7 @@ pub struct RbInput {
 /// Ruby shebang.
 pub fn is_ruby(path: &str, text: &str) -> bool {
     let base = path.rsplit('/').next().unwrap_or(path);
-    path.ends_with(".rb") || path.ends_with(".rake") || matches!(base, "Rakefile" | "Thorfile") || (!base.contains('.') && text.starts_with("#!") && text.lines().next().is_some_and(|l| l.contains("ruby")))
+    path.ends_with(".rb") || path.ends_with(".rake") || matches!(base, "Rakefile" | "Thorfile" | "Gemfile") || (!base.contains('.') && text.starts_with("#!") && text.lines().next().is_some_and(|l| l.contains("ruby")))
 }
 
 /// Libraries that ship with Ruby: required, but not packages the project depends on.
@@ -44,6 +44,23 @@ pub fn is_stdlib(name: &str) -> bool {
         name,
         "abbrev" | "base64" | "benchmark" | "bigdecimal" | "cgi" | "coverage" | "csv" | "date" | "delegate" | "did_you_mean" | "digest" | "drb" | "English" | "erb" | "etc" | "expect" | "fcntl" | "fiber" | "fiddle" | "fileutils" | "find" | "forwardable" | "getoptlong" | "io" | "ipaddr" | "irb" | "json" | "logger" | "matrix" | "monitor" | "mutex_m" | "net" | "nkf" | "objspace" | "observer" | "open-uri" | "open3" | "openssl" | "optparse" | "ostruct" | "pathname" | "pp" | "prettyprint" | "prime" | "pstore" | "psych" | "racc" | "rbconfig" | "rdoc" | "readline" | "reline" | "resolv" | "ripper" | "securerandom" | "set" | "shellwords" | "singleton" | "socket" | "stringio" | "strscan" | "syslog" | "tempfile" | "time" | "timeout" | "tmpdir" | "tsort" | "un" | "uri" | "weakref" | "yaml" | "zlib" | "rubygems" | "bundler" | "thread" | "rational" | "complex" | "enumerator" | "prism" | "random" | "win32ole"
     )
+}
+
+/// The package a `require` names: `rails` for its frameworks
+/// (`action_controller/railtie`), none for the standard library or a
+/// relative path.
+pub fn gem_of(spec: &str) -> Option<String> {
+    if spec.starts_with('.') || spec.starts_with('/') {
+        return None;
+    }
+    let root = spec.split('/').next().unwrap_or(spec);
+    if is_stdlib(root) {
+        return None;
+    }
+    Some(match root {
+        "action_cable" | "action_controller" | "action_dispatch" | "action_mailbox" | "action_mailer" | "action_text" | "action_view" | "active_job" | "active_model" | "active_record" | "active_storage" | "active_support" | "railties" | "rails" => "rails".into(),
+        _ => root.into(),
+    })
 }
 
 /// A class or module the project defines.

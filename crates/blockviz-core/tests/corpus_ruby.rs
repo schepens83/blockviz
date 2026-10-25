@@ -87,6 +87,13 @@ fn lobsters_is_a_rails_app() {
     ] {
         assert_eq!(file(&s, path).subtitle, role, "{path}");
     }
+    // The Gemfile is the package list; Rails' own requires are `rails`.
+    assert_eq!(file(&s, "Gemfile").subtitle, "dependencies");
+    let packages = s.nodes.iter().find(|n| n.title == "External packages").expect("packages");
+    for gem in ["rails", "solid_queue", "mission_control-jobs", "sqlite3"] {
+        assert!(packages.rows.iter().any(|r| r.key == gem), "{gem}: {:?}", packages.rows);
+    }
+    assert!(!packages.rows.iter().any(|r| matches!(r.key.as_str(), "action_controller" | "boot")), "{:?}", packages.rows);
     // Without a `require`, the app is layered by the constants it names:
     // models under jobs and controllers, helpers and jobs under controllers.
     let app = edges_in(&s, dir(&s, "app/"));

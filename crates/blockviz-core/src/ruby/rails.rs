@@ -10,6 +10,9 @@ pub fn file_role(path: &str) -> Option<&'static str> {
     if base == "Rakefile" || base.ends_with(".rake") {
         return Some("tasks");
     }
+    if base == "Gemfile" || base == "gems.rb" {
+        return Some("dependencies");
+    }
     if parts.len() >= 2 && parts[parts.len() - 2] == "bin" && !base.contains('.') {
         return Some("executable");
     }

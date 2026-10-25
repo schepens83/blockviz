@@ -629,9 +629,8 @@ impl<'p> Index<'p> {
                 // Ruby: gems by what is required of them (`active_support/core_ext`
                 // is `active_support`), not the standard library.
                 None if self.modules[mi].lang == Lang::Ruby => {
-                    let gem = spec.split('/').next().unwrap_or(spec);
-                    if !crate::ruby::is_stdlib(gem) {
-                        self.externals[mi].insert(gem.to_string());
+                    if let Some(gem) = crate::ruby::gem_of(spec) {
+                        self.externals[mi].insert(gem);
                     }
                 }
                 None if !spec.starts_with('.') && !spec.starts_with('/') => {
