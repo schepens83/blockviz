@@ -1,3 +1,9 @@
 # Deeply nested code recurses in the parser and analysis; give wasm room.
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "link-arg=-zstack-size=8388608"]
+
+# Prism (the Ruby parser) is C, and wasm32-unknown-unknown has no libc: the
+# headers in wasm-libc/ give it the little it uses. Natively each forwards to
+# the system's own.
+[env]
+C_INCLUDE_PATH = { value = "crates/blockviz-core/wasm-libc", relative = true }

@@ -20,6 +20,7 @@ pub mod notebook;
 pub mod outline;
 pub mod project;
 pub mod python;
+pub mod ruby;
 pub mod rust;
 pub mod text;
 pub mod timing;
