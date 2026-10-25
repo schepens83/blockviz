@@ -301,6 +301,13 @@ export default function App() {
     const t = setTimeout(() => engine.current?.peek(null), 1200);
     return () => clearTimeout(t);
   }, [markedBlock]);
+  // As long as the change stays unfolded in the list, its block stays pointed out, wherever the view is.
+  const listing = !!loaded?.compare && changesOpen && selected === null && removedSel === null && value === null;
+  useEffect(() => {
+    const model = loaded?.model;
+    if (!listing || !markedChange || markedBlock === null || !model) return engine.current?.setLocated(null);
+    engine.current?.setLocated(markedBlock, markedChange.status, blockName(model, model.node(markedBlock)));
+  }, [listing, markedChange, markedBlock, loaded]);
 
   // A block pointed out from the details panel stops being pointed out when the panel shows something else.
   useEffect(() => engine.current?.peek(null), [selected, value, removedSel, changesOpen]);

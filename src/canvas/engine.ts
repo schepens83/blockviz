@@ -1,6 +1,6 @@
 import { Camera, type CameraState, type Framing, type Plan } from './camera';
-import { clamp, panToReveal, type Insets, type Xf } from './geometry';
-import type { SceneDiff } from './diff';
+import { clamp, edgeMarker, locate, markerArea, panToReveal, viewBox, type Box, type Insets, type Xf } from './geometry';
+import type { SceneDiff, Status } from './diff';
 import type { SceneModel } from './model';
 import { Renderer, type EdgeHit, type Paint, type Trace } from './renderer';
 import { svgOf } from './svg';
@@ -49,6 +49,10 @@ export class Engine {
   private selected: number | null = null;
   /** How the code on screen differs from a base version (a pull request), when it is one. */
   private diff: SceneDiff | null = null;
+  /** The block of the change unfolded in the list, and how it changed: kept pointed out. */
+  private located: { id: number; status: Status; label: string } | null = null;
+  /** Where the pointer to it, out of view, is drawn this frame. */
+  private marker: Box | null = null;
   private flight: { start: number; duration: number; step: (t: number) => void } | null = null;
   private pointers = new Map<number, { x: number; y: number }>();
   /** A press that may still be a tap or click; `touch` for a finger or pen. */
@@ -119,6 +123,12 @@ export class Engine {
   /** Shows how the code differs from a base version (null: it is not a change). */
   setDiff(diff: SceneDiff | null) {
     this.diff = diff;
+    this.invalidate();
+  }
+
+  /** Keeps a block pointed out, in the color of how it changed, wherever it is (null: stop). */
+  setLocated(id: number | null, status: Status = 'changed', label = '') {
+    this.located = id === null ? null : { id, status, label };
     this.invalidate();
   }
 
@@ -369,6 +379,7 @@ export class Engine {
     }
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.renderer.draw(this.paint());
+    this.drawLocated();
     if (now - this.lastEmit > 120 || !this.flight) {
       this.lastEmit = now;
       // Reported only when it changes: not on every frame of a pan or zoom.
@@ -382,6 +393,77 @@ export class Engine {
     }
     if (this.flight) this.invalidate();
   };
+
+  /** The screen box of a block, when the camera is anchored in a container above it. */
+  private screenBox(id: number): Box | undefined {
+    const target = this.model.canonicalPath(id);
+    const here = this.camera.path;
+    if (target.length <= here.length || !here.every((p, k) => target[k] === p)) return undefined;
+    const b = this.camera.boxIn(target, here.length - 1);
+    const { x, y, s } = this.camera.xf;
+    return { x: x + b.x * s, y: y + b.y * s, w: b.w * s, h: b.h * s };
+  }
+
+  /** Over the diagram: the block itself, the block it is in, or an arrow on the edge of the view leading to it. */
+  private drawLocated() {
+    this.marker = null;
+    const l = this.located;
+    if (!l) return;
+    const ancestors: number[] = [];
+    for (let p = this.model.node(l.id).parent; p !== undefined; p = this.model.node(p).parent) ancestors.push(p);
+    const view = viewBox(this.width, this.height, this.camera.insets);
+    const found = locate(l.id, ancestors, this.renderer.hits, this.screenBox(l.id), view);
+    if (!found) return;
+    const ink = this.renderer.theme.change[l.status].ink;
+    const ctx = this.ctx;
+    ctx.save();
+    if (found.kind !== 'away') {
+      const within = found.kind === 'within';
+      const pad = within ? 4 : 3;
+      const { x, y, w, h } = found.box;
+      ctx.beginPath();
+      ctx.roundRect(x - pad, y - pad, w + 2 * pad, h + 2 * pad, 6);
+      ctx.globalAlpha = within ? 0.1 : 0.16;
+      ctx.fillStyle = ink;
+      ctx.fill();
+      ctx.globalAlpha = within ? 0.75 : 1;
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = within ? 2 : 3;
+      ctx.lineJoin = 'round';
+      ctx.setLineDash(within || l.status === 'removed' ? [7, 5] : []);
+      ctx.stroke();
+    } else {
+      const m = edgeMarker(view, found.box, 16);
+      if (m) {
+        ctx.font = '600 11.5px system-ui, sans-serif';
+        const text = l.label.length > 28 ? `${l.label.slice(0, 27)}…` : l.label;
+        const area = markerArea(m, ctx.measureText(text).width + 10);
+        this.marker = area;
+        ctx.beginPath();
+        ctx.roundRect(area.x, area.y, area.w, area.h, 12);
+        ctx.globalAlpha = 0.94;
+        ctx.fillStyle = this.renderer.theme.paper;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        const c = Math.cos(m.angle);
+        const s = Math.sin(m.angle);
+        const at = (u: number, v: number): [number, number] => [m.x + u * c - v * s, m.y + u * s + v * c];
+        ctx.beginPath();
+        ctx.moveTo(...at(6, 0));
+        ctx.lineTo(...at(-4, -5));
+        ctx.lineTo(...at(-4, 5));
+        ctx.closePath();
+        ctx.fillStyle = ink;
+        ctx.fill();
+        ctx.textAlign = 'left';
+        ctx.fillText(text, c > 0 ? area.x + 10 : area.x + 24, area.y + 16);
+      }
+    }
+    ctx.restore();
+  }
 
   // ----- input -----------------------------------------------------------------------
 
@@ -434,6 +516,12 @@ export class Engine {
     this.unhover();
     this.canvas.setPointerCapture(e.pointerId);
     const p = this.point(e);
+    // The arrow to a block out of view takes you there.
+    const m = this.marker;
+    if (m && this.located && p.x >= m.x && p.x <= m.x + m.w && p.y >= m.y && p.y <= m.y + m.h) {
+      this.canvas.releasePointerCapture(e.pointerId);
+      return this.revealNode(this.located.id);
+    }
     this.pointers.set(e.pointerId, p);
     this.press = { ...p, moved: false, touch: e.pointerType !== 'mouse' };
   };

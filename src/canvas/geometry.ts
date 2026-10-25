@@ -241,3 +241,51 @@ export function panToReveal(b: Box, width: number, height: number, i: Insets, ma
     dy: axis(b.y, b.y + b.h, i.top + margin, height - i.bottom - margin),
   };
 }
+
+/** What to point out for a change's block: itself, the block around it that is drawn, or where it is out of view. */
+export type Located = { kind: 'itself' | 'away'; box: Box } | { kind: 'within'; id: number; box: Box };
+
+const meets = (a: Box, b: Box) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+/** The part of the screen the overlays leave free. */
+export const viewBox = (width: number, height: number, i: Insets): Box => ({ x: i.left, y: i.top, w: Math.max(1, width - i.left - i.right), h: Math.max(1, height - i.top - i.bottom) });
+
+/**
+ * What to point out for block `target`: `ancestors` are the blocks around it, nearest first; `hits` the
+ * blocks drawn this frame; `at` where the camera puts it on screen, if it knows; `view` the free part
+ * of the screen. Null when nothing of it can be found.
+ */
+export function locate(target: number, ancestors: number[], hits: { id: number; box: Box; clear: boolean }[], at: Box | undefined, view: Box): Located | null {
+  const clear = (id: number) => hits.find(h => h.id === id && h.clear && meets(h.box, view))?.box;
+  const own = clear(target);
+  if (own) return { kind: 'itself', box: own };
+  if (at && !meets(at, view)) return { kind: 'away', box: at };
+  for (const a of ancestors) {
+    const box = clear(a);
+    if (box) return { kind: 'within', id: a, box };
+  }
+  return at ? { kind: 'away', box: at } : null;
+}
+
+/** A marker on the edge of the view: where, and which way (radians) it points. */
+export interface Marker { x: number; y: number; angle: number }
+
+/** Where the line from the middle of `view` to the middle of `target` crosses the edge of `view`, `margin` inside it; null when the target is (partly) in view. */
+export function edgeMarker(view: Box, target: Box, margin: number): Marker | null {
+  if (meets(view, target)) return null;
+  const cx = view.x + view.w / 2;
+  const cy = view.y + view.h / 2;
+  const dx = target.x + target.w / 2 - cx;
+  const dy = target.y + target.h / 2 - cy;
+  const hw = Math.max(0, view.w / 2 - margin);
+  const hh = Math.max(0, view.h / 2 - margin);
+  const k = Math.min(Math.abs(dx) > 1e-9 ? hw / Math.abs(dx) : Infinity, Math.abs(dy) > 1e-9 ? hh / Math.abs(dy) : Infinity);
+  if (!isFinite(k)) return null;
+  return { x: cx + dx * k, y: cy + dy * k, angle: Math.atan2(dy, dx) };
+}
+
+/** The marker's hit area: the arrow and its label, which sits toward the middle of the view. */
+export function markerArea(m: Marker, labelW: number): Box {
+  const w = 24 + labelW;
+  return { x: Math.cos(m.angle) > 0 ? m.x - w + 12 : m.x - 12, y: m.y - 12, w, h: 24 };
+}

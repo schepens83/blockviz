@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SceneNode } from '../core/types';
-import { childXf, frame, frameAround, frameReadable, NO_INSETS, panToReveal, parentXf, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
+import { childXf, edgeMarker, frame, frameAround, frameReadable, locate, markerArea, NO_INSETS, panToReveal, parentXf, READABLE, rectLine, smoothPath, viewOf, visibleRuns, xfOf, zoomAt } from './geometry';
 
 const box = (over: Partial<SceneNode> = {}): SceneNode => ({
   id: 1, kind: 'function', shape: 'box', category: 'function', title: 'f',
@@ -203,5 +203,50 @@ describe('panning a box into view', () => {
   it('shows the start of a box too big to fit, and leaves one that fills the view', () => {
     expect(panToReveal({ x: -500, y: 100, w: 3000, h: 50 }, 1000, 600, i, 10)).toEqual({ dx: 0, dy: 0 });
     expect(panToReveal({ x: 900, y: 100, w: 3000, h: 50 }, 1000, 600, i, 10).dx).toBe(-890);
+  });
+});
+
+describe('pointing out where a change is', () => {
+  const view = { x: 0, y: 50, w: 800, h: 500 };
+  const hit = (id: number, box: { x: number; y: number; w: number; h: number }, clear: boolean) => ({ id, box, clear });
+
+  it('is the block itself when it can be made out', () => {
+    const b = { x: 100, y: 100, w: 200, h: 80 };
+    expect(locate(7, [3, 1], [hit(7, b, true), hit(3, view, true)], b, view)).toEqual({ kind: 'itself', box: b });
+  });
+
+  it('is the nearest block around it when it is too small or not opened', () => {
+    const tiny = { x: 120, y: 120, w: 3, h: 3 };
+    const room = { x: 100, y: 100, w: 300, h: 200 };
+    expect(locate(7, [3, 1], [hit(7, tiny, false), hit(3, room, true), hit(1, view, true)], tiny, view)).toEqual({ kind: 'within', id: 3, box: room });
+    expect(locate(7, [3, 1], [hit(3, room, false), hit(1, view, true)], tiny, view)).toEqual({ kind: 'within', id: 1, box: view });
+    expect(locate(7, [3, 1], [hit(1, view, true)], undefined, view)).toEqual({ kind: 'within', id: 1, box: view });
+  });
+
+  it('is away when it is outside the view, even with its container in view', () => {
+    const far = { x: 2000, y: 100, w: 100, h: 50 };
+    expect(locate(7, [1], [hit(1, view, true)], far, view)).toEqual({ kind: 'away', box: far });
+    expect(locate(7, [], [], undefined, view)).toBeNull();
+  });
+
+  it('puts a marker where the line to it leaves the view', () => {
+    const m = edgeMarker(view, { x: 1900, y: 275, w: 100, h: 50 }, 10)!;
+    expect([m.x, m.y, m.angle]).toEqual([790, 300, 0]);
+    const up = edgeMarker(view, { x: 350, y: -900, w: 100, h: 50 }, 10)!;
+    expect(up.y).toBe(60);
+    expect(up.x).toBe(400);
+    expect(up.angle).toBeCloseTo(-Math.PI / 2, 9);
+    const d = edgeMarker(view, { x: 1800, y: 1800, w: 100, h: 100 }, 10)!;
+    expect(d.y).toBe(540);
+    expect(d.x).toBeLessThan(790);
+    expect(edgeMarker(view, { x: 700, y: 100, w: 300, h: 50 }, 10)).toBeNull();
+  });
+
+  it('holds the marker and its label toward the middle of the view', () => {
+    const right = markerArea({ x: 790, y: 300, angle: 0 }, 80);
+    expect(right.x).toBeLessThan(700);
+    expect(right.x + right.w).toBeGreaterThan(790);
+    const left = markerArea({ x: 10, y: 300, angle: Math.PI }, 80);
+    expect(left.x + left.w).toBeGreaterThan(100);
   });
 });
