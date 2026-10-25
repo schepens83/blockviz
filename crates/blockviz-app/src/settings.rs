@@ -12,6 +12,8 @@ pub struct Settings {
     pub scheme: Option<String>,
     pub trunks: bool,
     pub panel_w: Option<f64>,
+    /// The changes list shows everything, not only what the view is zoomed into.
+    pub unscoped: bool,
     /// Folders opened, most recent first.
     pub recent: Vec<String>,
 }

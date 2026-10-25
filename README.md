@@ -57,6 +57,24 @@ Both versions are analyzed (the head and the commit it branched off its base) an
 
 A repository on your machine can be read the same way. In the Open dialog, "Choose repository…" opens your system's folder dialog (zenity or kdialog on Linux, the Finder dialog on macOS, PowerShell on Windows; any folder inside a repository will do), and the last eight repositories are one click away; a path can be typed instead. Then choose what to compare, or use an address: a branch against `main` (or `master`) from where it branched off, as GitHub does (`#git=/path/to/repo&head=feature&base=main`); two exact revisions, each picked from a list of branches, tags and recent commits (searchable; `HEAD~3` or a full sha can be used too), with a warning when After is older than Before so a diff never runs backwards by accident (`#git=/path/to/repo&mode=refs&base=v1.0&head=main`); or the uncommitted changes, the files on disk (untracked ones too, ignored ones not) against HEAD (`#git=/path/to/repo&mode=worktree`). The browser cannot run git, so the dev server (`npm run dev`, or `npm run preview`) does it with the `git` command; a static build cannot. Nothing is uploaded, and the endpoints (`/__git/…`) answer only the page the server serves.
 
+### Showing commits from a coding agent
+
+The desktop app (`crates/blockviz-app`) can open straight into a comparison, and a coding agent's hook can use that to show exactly what it is about to commit, while the agent's own permission prompt does the asking.
+
+```
+blockviz-app <repo> --compare <worktree|staged|branch|A..B|A...B> [--title <text>]
+```
+
+`staged` is what a commit would make (the index against HEAD), `worktree` the folder as it is against HEAD, `branch` this branch since it left the default branch, `A..B` two exact revisions and `A...B` the second since it left the first. `--title` names the comparison in the changes panel (a commit message). The app runs once: a second launch hands its request to the running window, over a Unix socket (`$XDG_RUNTIME_DIR/blockviz-app.sock`), raises it and exits.
+
+`blockviz-app hook claude` is made for Claude Code's `PreToolUse` hook. It reads the hook's JSON from stdin and, when the Bash command runs `git commit` (also `git -C dir commit`, in `&&` chains; `-a` shows the working tree, otherwise what is staged; `-m` becomes the title), starts or reuses blockviz without waiting for it, and answers `ask`, so the agent asks you even in modes that would not. Any other command is left alone. Add to `~/.claude/settings.json`, with the path of your build:
+
+```json
+{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/abs/path/to/crates/blockviz-app/target/release/blockviz-app hook claude"}]}]}}
+```
+
+For another agent whose hook can run a command, pass it the shell command being run: `blockviz-app hook --command "$COMMAND" [--cwd "$DIR"]` (it prints nothing; the agent's own approval step does the asking). Pushes are not shown.
+
 ### Abstraction rules
 
 The goal is blocks a reader would name, not a syntax tree.

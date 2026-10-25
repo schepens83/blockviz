@@ -1155,4 +1155,31 @@ mod tests {
         let file = describe_change(&d, &Change { status: Status::Changed, id: id(&d.head, "model.py"), at: 0 });
         assert_eq!((file.context, file.line, file.kind), (None, None, "File"));
     }
+
+    #[test]
+    fn lists_the_changes_in_the_block_the_view_is_zoomed_into() {
+        use crate::scope::{changes_in, files_in, scope_name};
+        let d = fixture();
+        let h = &d.head;
+        let titles = |scope: u32| changes_in(h, &d.changes, scope).iter().map(|&i| format!("{:?} {}", d.changes[i].status, if d.changes[i].status == Status::Removed { d.base.node(d.changes[i].id).title.clone() } else { h.node(d.changes[i].id).title.clone() })).collect::<Vec<_>>();
+        // Zoomed out: all of them.
+        assert_eq!(changes_in(h, &d.changes, h.root()).len(), d.changes.len());
+        // A file holds its own, and the removed block by where it was; another file none.
+        assert!(titles(id(h, "model.py")).contains(&"Removed old".to_string()));
+        assert_eq!(titles(id(h, "model.py")).len(), d.changes.len());
+        assert!(titles(id(h, "util.py")).is_empty());
+        // Down in a definition: just what changed in it.
+        assert_eq!(titles(id(h, "load")), vec!["Changed parse".to_string()]);
+        assert_eq!(titles(id(h, "save")), Vec::<String>::new());
+        let files = [modified("model.py"), modified("util.py"), modified("docs/x.md")];
+        let paths = |scope: u32| files_in(h, &files, scope).iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+        assert_eq!(paths(h.root()).len(), 3);
+        assert_eq!(paths(id(h, "model.py")), vec!["model.py"]);
+        assert_eq!(paths(id(h, "load")), vec!["model.py"]);
+        assert_eq!(paths(id(h, "util.py")), vec!["util.py"]);
+        let moved = [renamed("lib/new.py", "model.py")];
+        assert_eq!(files_in(h, &moved, id(h, "model.py")).len(), 1);
+        assert_eq!(scope_name(h, h.root()), "");
+        assert_eq!(scope_name(h, id(h, "load")), "model.py › load");
+    }
 }

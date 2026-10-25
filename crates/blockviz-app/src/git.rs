@@ -120,6 +120,37 @@ impl Repo {
         files
     }
 
+    /// The folder's files as they are staged (the index), by the rules of `files_at`.
+    pub fn index_files(&self) -> Files {
+        let mut files = Files::new();
+        let Some(listing) = run(&self.root, &["ls-files", "-s", "-z"]) else { return files };
+        let dir = if self.prefix.is_empty() { String::new() } else { format!("{}/", self.prefix) };
+        let mut wanted = vec![];
+        for entry in listing.split(|&b| b == 0) {
+            let entry = String::from_utf8_lossy(entry);
+            // "<mode> <object> <stage>\t<path>"; a file in conflict has no stage 0.
+            let Some((meta, full)) = entry.split_once('\t') else { continue };
+            let meta: Vec<&str> = meta.split_whitespace().collect();
+            let &[mode, oid, stage] = meta.as_slice() else { continue };
+            let Some(path) = full.strip_prefix(&dir) else { continue };
+            if stage != "0" || mode == "120000" || mode == "160000" || ignored(path) {
+                continue;
+            }
+            files.insert(path.to_string(), File { text: None, bytes: 0 });
+            wanted.push((path.to_string(), oid.to_string()));
+        }
+        let (paths, oids): (Vec<String>, Vec<String>) = wanted.into_iter().unzip();
+        for (path, blob) in paths.iter().zip(self.blobs(oids)) {
+            if let (Some(f), Some(b)) = (files.get_mut(path), blob) {
+                f.bytes = b.len() as u64;
+                if f.bytes < MAX_TEXT {
+                    f.text = String::from_utf8(b).ok();
+                }
+            }
+        }
+        files
+    }
+
     /// The contents of the objects `oids`, in order, from one `git cat-file`.
     fn blobs(&self, oids: Vec<String>) -> Vec<Option<Vec<u8>>> {
         if oids.is_empty() {
@@ -335,6 +366,38 @@ mod tests {
 
         git(&dir, &["checkout", "-q", "--detach"]);
         assert_eq!(repo.branch(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reads_what_is_staged_apart_from_the_working_tree_and_from_head() {
+        let dir = std::env::temp_dir().join(format!("blockviz-index-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        let repo = Repo::find(&dir).unwrap();
+        // No commit yet: the index is all there is, and HEAD has nothing.
+        write(&dir, "a.py", "a = 1\n");
+        git(&dir, &["add", "a.py"]);
+        assert!(repo.files_at("HEAD").is_empty());
+        assert_eq!(keys(&repo.index_files()), ["a.py"]);
+        git(&dir, &["commit", "-q", "-m", "One"]);
+        write(&dir, "a.py", "a = 2\n");
+        write(&dir, "b.py", "b = 1\n");
+        write(&dir, "pkg/c.py", "c = 1\n");
+        write(&dir, "logo.bin", [0u8, 159, 0]);
+        git(&dir, &["add", "a.py", "b.py", "logo.bin", "pkg/c.py"]);
+        // After staging: a different change on disk, and one file not staged at all.
+        write(&dir, "a.py", "a = 3\n");
+        write(&dir, "d.py", "d = 1\n");
+        let staged = repo.index_files();
+        assert_eq!(keys(&staged), ["a.py", "b.py", "logo.bin", "pkg/c.py"]);
+        assert_eq!(staged["a.py"].text.as_deref(), Some("a = 2\n"));
+        assert_eq!((staged["logo.bin"].text.as_deref(), staged["logo.bin"].bytes), (None, 3));
+        let c = |p: &str, s, prev: Option<&str>| FileChange { path: p.into(), status: s, previous: prev.map(String::from) };
+        assert_eq!(changes(&repo.files_at("HEAD"), &staged), [c("a.py", FileStatus::Modified, None), c("b.py", FileStatus::Added, None), c("logo.bin", FileStatus::Added, None), c("pkg/c.py", FileStatus::Added, None)]);
+        // From a subfolder: its own files, by path within it.
+        assert_eq!(keys(&Repo::find(&dir.join("pkg")).unwrap().index_files()), ["c.py"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

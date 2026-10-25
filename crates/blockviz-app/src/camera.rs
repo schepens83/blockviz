@@ -48,6 +48,27 @@ pub struct Insets {
     pub left: f64,
 }
 
+/// How far to move the camera so a box (in screen units) is in view, clear of
+/// the overlays and `margin` from their edges: not at all if it is, just far
+/// enough if it sticks out, centered if it is off screen. A box too big to fit
+/// shows its start.
+pub fn pan_to_reveal(b: Rect, width: f64, height: f64, i: Insets, margin: f64) -> (f64, f64) {
+    let axis = |lo: f64, hi: f64, from: f64, to: f64| {
+        if lo >= from && hi <= to {
+            0.0
+        } else if hi < from || lo > to {
+            if hi - lo >= to - from { from - lo } else { (from + to) / 2.0 - (lo + hi) / 2.0 }
+        } else if hi - lo >= to - from {
+            if lo <= from && hi >= to { 0.0 } else { from - lo }
+        } else if lo < from {
+            from - lo
+        } else {
+            to - hi
+        }
+    };
+    (axis(b.x, b.x + b.w, i.left + margin, width - i.right - margin), axis(b.y, b.y + b.h, i.top + margin, height - i.bottom - margin))
+}
+
 pub fn box_of(t: Xf, n: &Node) -> Rect {
     Rect { x: t.x + n.x * t.s, y: t.y + n.y * t.s, w: n.w * t.s, h: n.h * t.s }
 }
@@ -305,6 +326,16 @@ impl Camera {
         (box_of(t, node), t.s, m.interior(t, node).map(|i| i.s))
     }
 
+    /// Where the node at the end of `target` (an instance path) is on screen, if the camera is anchored
+    /// in a container above it (else None: it would have to fly there).
+    pub fn screen_box(&self, m: &Model, target: &[u32]) -> Option<Rect> {
+        if target.len() <= self.path.len() || !target.starts_with(&self.path) {
+            return None;
+        }
+        let (b, _, _) = self.place(m, target, self.path.len() - 1);
+        Some(Rect { x: self.xf.x + b.x * self.xf.s, y: self.xf.y + b.y * self.xf.s, w: b.w * self.xf.s, h: b.h * self.xf.s })
+    }
+
     /// Plans a smooth flight framing the node at the end of `target` (an instance path).
     pub fn flight(&self, m: &Model, target: &[u32], width: f64, height: f64, how: Framing, pad: f64) -> Plan {
         let mut common = self.path.iter().zip(target).take_while(|(a, b)| a == b).count();
@@ -419,6 +450,32 @@ mod tests {
 
     fn close(a: f64, b: f64, eps: f64) -> bool {
         (a - b).abs() <= eps * a.abs().max(b.abs()).max(1.0)
+    }
+
+    fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
+        Rect { x, y, w, h }
+    }
+
+    /// A 1000×600 screen, 700×510 of it visible from (0, 50) once overlays are clear of it.
+    const COVERED: Insets = Insets { top: 50.0, right: 300.0, bottom: 40.0, left: 0.0 };
+
+    #[test]
+    fn a_box_in_view_is_left_where_it_is_and_one_sticking_out_moves_just_far_enough() {
+        assert_eq!(pan_to_reveal(rect(100.0, 100.0, 50.0, 50.0), 1000.0, 600.0, COVERED, 10.0), (0.0, 0.0));
+        assert_eq!(pan_to_reveal(rect(650.0, 100.0, 100.0, 50.0), 1000.0, 600.0, COVERED, 10.0), (-60.0, 0.0));
+        assert_eq!(pan_to_reveal(rect(100.0, 20.0, 50.0, 50.0), 1000.0, 600.0, COVERED, 10.0), (0.0, 40.0));
+    }
+
+    #[test]
+    fn a_box_off_screen_is_centered() {
+        let (dx, dy) = pan_to_reveal(rect(2000.0, 1000.0, 100.0, 100.0), 1000.0, 600.0, COVERED, 10.0);
+        assert_eq!((2000.0 + dx + 50.0, 1000.0 + dy + 50.0), (350.0, 305.0));
+    }
+
+    #[test]
+    fn a_box_too_big_to_fit_shows_its_start_unless_it_fills_the_view() {
+        assert_eq!(pan_to_reveal(rect(-500.0, 100.0, 3000.0, 50.0), 1000.0, 600.0, COVERED, 10.0), (0.0, 0.0));
+        assert_eq!(pan_to_reveal(rect(900.0, 100.0, 3000.0, 50.0), 1000.0, 600.0, COVERED, 10.0).0, -890.0);
     }
 
     #[test]

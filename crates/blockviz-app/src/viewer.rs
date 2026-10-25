@@ -5,6 +5,7 @@
 use crate::anchor;
 use crate::camera::{Camera, Framing, Insets, Plan, Xf};
 use crate::diff::SceneDiff;
+use crate::request::Spec;
 use crate::git::{self, Commit, Repo};
 use crate::gpuipen::GpuiPen;
 use crate::history::{Entry, History};
@@ -50,6 +51,8 @@ pub struct Compared {
     pub base_files: Files,
     pub base: Rc<Model>,
     pub diff: Rc<SceneDiff>,
+    /// What is on screen as the head: the working tree, or a snapshot (`staged`, a revision).
+    pub head_label: String,
 }
 
 /// A press that may still be a click: where it started, where it was last, and whether it has moved.
@@ -86,6 +89,32 @@ pub enum Menu {
 pub const PANEL_W: f64 = 380.0;
 pub const PANEL_MIN: f64 = 300.0;
 
+/// The panel's width once its left edge, grabbed at `x0` when it was `w0` wide, is dragged to `x`
+/// (the panel hangs from the right: dragging left widens it), within its narrowest and the window's room.
+pub fn dragged_width(w0: f64, x0: f64, x: f64, window: f64) -> f64 {
+    (w0 - (x - x0)).clamp(PANEL_MIN, (window - 160.0).max(PANEL_MIN))
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    #[test]
+    fn dragging_the_edge_left_widens_and_right_narrows_it() {
+        assert_eq!(dragged_width(380.0, 900.0, 850.0, 1400.0), 430.0);
+        assert_eq!(dragged_width(380.0, 900.0, 950.0, 1400.0), 330.0);
+    }
+
+    #[test]
+    fn stops_at_its_narrowest_and_at_the_windows_room() {
+        assert_eq!(dragged_width(380.0, 900.0, 1300.0, 1400.0), PANEL_MIN);
+        assert_eq!(dragged_width(600.0, 900.0, 900.0, 1400.0), 600.0);
+        assert_eq!(dragged_width(380.0, 900.0, 0.0, 1400.0), 1240.0);
+        // A window too narrow for either keeps the minimum.
+        assert_eq!(dragged_width(380.0, 900.0, 0.0, 400.0), PANEL_MIN);
+    }
+}
+
 const fn ease(t: f64) -> f64 {
     if t < 0.5 {
         4.0 * t * t * t
@@ -121,6 +150,14 @@ pub struct Viewer {
     pub removed_sel: Option<usize>,
     /// Reading a change: the list of its changes is open (when nothing else is in the panel).
     pub changes_open: bool,
+    /// The change unfolded in the changes list and outlined in the diagram, as its index among the changes.
+    pub marked: Option<usize>,
+    /// The project on screen is a snapshot (the index, a revision) with this name, not a folder followed as it changes.
+    pub snapshot: Option<String>,
+    /// A comparison to start once the folder being opened has been analyzed.
+    pending: Option<(Spec, Option<String>)>,
+    /// The changes list is limited to what the view is zoomed into.
+    pub scoped: bool,
     pub flight: Option<(Instant, Plan)>,
     /// Still showing the initial whole-project framing (nothing has moved the camera).
     framed: bool,
@@ -170,6 +207,7 @@ impl Viewer {
         });
         let trunks = settings.trunks;
         let panel_w = settings.panel_w.unwrap_or(PANEL_W);
+        let settings_unscoped = settings.unscoped;
         Viewer {
             m: None,
             project: None,
@@ -191,6 +229,10 @@ impl Viewer {
             related: None,
             removed_sel: None,
             changes_open: true,
+            marked: None,
+            snapshot: None,
+            pending: None,
+            scoped: !settings_unscoped,
             flight: None,
             framed: true,
             press: None,
@@ -259,6 +301,7 @@ impl Viewer {
         }
         self.generation += 1;
         let generation = self.generation;
+        self.snapshot = None;
         self.error = None;
         self.dialog = None;
         let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -301,8 +344,7 @@ impl Viewer {
         cx.notify();
     }
 
-    /// Shows a project analyzed elsewhere, as its first analysis (tests open projects this way).
-    #[cfg(test)]
+    /// Shows a project analyzed elsewhere, as its first analysis (tests open projects this way, and snapshots).
     pub fn show(&mut self, folder: PathBuf, files: Files, model: Model, cx: &mut Context<Self>) {
         let (ask, _) = std::sync::mpsc::channel();
         self.project = Some(Project { folder, ask, repo: None, files: files.clone(), elapsed: Duration::ZERO });
@@ -326,6 +368,7 @@ impl Viewer {
             }
             self.m = Some(new);
             self.compare = None;
+            self.marked = None;
             self.selected = None;
             self.selected_path = None;
             self.value = None;
@@ -394,6 +437,12 @@ impl Viewer {
         }
         self.sync_panel(cx);
         cx.notify();
+        // A comparison asked for along with the folder starts once it is there.
+        if u.first {
+            if let Some((spec, title)) = self.pending.take() {
+                self.compare_live(spec, title, cx);
+            }
+        }
     }
 
     /// Lays the project out again, each block's values on one branching line (or not).
@@ -441,7 +490,9 @@ impl Viewer {
                 let base = Rc::new(model);
                 let changes = git::changes(&files, &v.project.as_ref().unwrap().files);
                 let diff = Rc::new(SceneDiff::new(base.clone(), head, changes));
-                v.compare = Some(Compared { rev, kind, label, title, base_files: files, base, diff });
+                let head_label = v.snapshot.clone().unwrap_or_else(|| "working tree".into());
+                v.compare = Some(Compared { rev, kind, label, title, base_files: files, base, diff, head_label });
+                v.marked = None;
                 v.selected = None;
                 v.selected_path = None;
                 v.value = None;
@@ -456,16 +507,131 @@ impl Viewer {
         .detach();
     }
 
+    /// The Compare menu's "Staged changes": what a commit would make, against HEAD.
+    pub fn compare_staged(&mut self, cx: &mut Context<Self>) {
+        match self.project.as_ref().map(|p| p.folder.clone()) {
+            Some(folder) => self.open_comparison(folder, Spec::Staged, None, cx),
+            None => {}
+        }
+    }
+
+    /// A comparison of the folder on screen, as it is now, with the title it is given (or its own).
+    fn compare_live(&mut self, spec: Spec, title: Option<String>, cx: &mut Context<Self>) {
+        match spec {
+            Spec::Worktree => self.start_compare("HEAD".into(), "Uncommitted changes".into(), "HEAD".into(), title.unwrap_or_else(|| "Working tree vs HEAD".into()), cx),
+            _ => self.compare_branch(cx),
+        }
+    }
+
+    /// Shows the repository `folder` is in as `spec` says: the working tree followed as it changes, or a
+    /// snapshot of the index or of a revision, each against its base.
+    pub fn open_comparison(&mut self, folder: PathBuf, spec: Spec, title: Option<String>, cx: &mut Context<Self>) {
+        let Some(repo) = Repo::find(&folder) else {
+            self.error = Some(format!("{} is not in a git repository.", folder.display()));
+            return cx.notify();
+        };
+        let root = repo.root().to_path_buf();
+        if matches!(spec, Spec::Worktree | Spec::Branch) {
+            let here = self.snapshot.is_none() && self.m.is_some() && self.project.as_ref().is_some_and(|p| p.folder == root.canonicalize().unwrap_or(root.clone()));
+            if here {
+                return self.compare_live(spec, title, cx);
+            }
+            self.pending = Some((spec, title));
+            return self.open_folder(root, cx);
+        }
+        if let Some(p) = self.project.take() {
+            let _ = p.ask.send(Ask::Stop);
+        }
+        self.generation += 1;
+        let generation = self.generation;
+        self.error = None;
+        self.dialog = None;
+        self.pending = None;
+        let name = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        self.busy = Some(format!("Reading {name}…"));
+        self.snapshot = Some(match &spec {
+            Spec::Staged => "staged".into(),
+            Spec::Refs(_, b) | Spec::MergeBase(_, b) => b.clone(),
+            _ => String::new(),
+        });
+        let trunks = self.trunks;
+        let task = cx.background_executor().spawn({
+            let name = name.clone();
+            async move {
+                let known = |rev: &str| repo.resolve(rev).map(|_| ()).ok_or_else(|| format!("No revision named {rev}."));
+                // The version to show, what it is compared with, and how to say so.
+                let (files, base, kind, label, said) = match spec {
+                    Spec::Staged => (repo.index_files(), "HEAD".to_string(), "Staged changes", "HEAD".to_string(), "Staged changes vs HEAD".to_string()),
+                    Spec::Refs(a, b) => {
+                        known(&a)?;
+                        known(&b)?;
+                        (repo.files_at(&b), a.clone(), "Two revisions", a.clone(), format!("{a}..{b}"))
+                    }
+                    Spec::MergeBase(a, b) => {
+                        known(&a)?;
+                        known(&b)?;
+                        let base = repo.merge_base(&a, &b).ok_or_else(|| format!("{a} and {b} have no history in common."))?;
+                        (repo.files_at(&b), base, "Branch compare", a.clone(), format!("{a}...{b}"))
+                    }
+                    Spec::Worktree | Spec::Branch => return Err("Not a snapshot.".to_string()),
+                };
+                let scene = blockviz_core::analyze_with(&name, live::inputs(&files), blockviz_core::layout::Options { shared_trunks: trunks });
+                let model = Model::new(scene, live::texts(&files));
+                Ok((files, model, base, kind.to_string(), label, said))
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let made = task.await;
+            let _ = this.update(cx, |v, cx| {
+                if v.generation != generation {
+                    return;
+                }
+                v.busy = None;
+                match made {
+                    Err(e) => {
+                        v.snapshot = None;
+                        v.error = Some(e);
+                        cx.notify();
+                    }
+                    Ok((files, model, base, kind, label, said)) => {
+                        let shown = v.snapshot.clone();
+                        v.show(root, files, model, cx);
+                        v.snapshot = shown;
+                        v.title = format!("{name} · {said} · blockviz");
+                        v.start_compare(base, kind, label, title.unwrap_or(said), cx);
+                    }
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Does what another launch of the app asked: opens its repository, in the comparison it names.
+    pub fn open_request(&mut self, req: crate::request::Request, cx: &mut Context<Self>) {
+        let folder = PathBuf::from(&req.repo);
+        match req.compare.as_deref().map(Spec::parse) {
+            Some(Ok(spec)) => self.open_comparison(folder, spec, req.title, cx),
+            Some(Err(e)) => {
+                self.error = Some(e);
+                cx.notify();
+            }
+            None => self.open_folder(folder, cx),
+        }
+    }
+
     /// The code on screen changed: how it differs from the base, again.
     fn compare_again(&mut self) {
         let (Some(c), Some(head), Some(p)) = (self.compare.as_mut(), self.m.clone(), self.project.as_ref()) else { return };
         let changes = git::changes(&c.base_files, &p.files);
         c.diff = Rc::new(SceneDiff::new(c.base.clone(), head, changes));
         self.removed_sel = None;
+        self.marked = None;
     }
 
     pub fn stop_compare(&mut self, cx: &mut Context<Self>) {
         self.compare = None;
+        self.marked = None;
         self.removed_sel = None;
         self.menu = None;
         self.camera.insets = self.insets();
@@ -486,6 +652,11 @@ impl Viewer {
 
     /// "This branch": everything since the branch left the default branch.
     pub fn compare_branch(&mut self, cx: &mut Context<Self>) {
+        // A snapshot is not the folder: go back to it first.
+        if let (Some(_), Some(p)) = (&self.snapshot, &self.project) {
+            let folder = p.folder.clone();
+            return self.open_comparison(folder, Spec::Branch, None, cx);
+        }
         let Some(repo) = self.project.as_ref().and_then(|p| p.repo.clone()) else { return };
         let Some(base) = self.default_branch.clone() else { return };
         let Some(sha) = repo.merge_base("HEAD", &base) else {
@@ -716,17 +887,107 @@ impl Viewer {
         d.index_of(self.selected?, false)
     }
 
-    /// The next (`delta` 1) or previous (-1) change from the one being read, round the list.
-    pub fn step_change(&mut self, delta: i32, cx: &mut Context<Self>) {
-        let n = self.compare.as_ref().map_or(0, |c| c.diff.changes.len());
-        if n == 0 {
+    /// The block that is where the view is zoomed into (the repository when zoomed out).
+    pub fn scope(&self) -> Option<u32> {
+        let m = self.m.as_ref()?;
+        Some(self.crumbs.last().copied().unwrap_or_else(|| m.root()))
+    }
+
+    /// The changes the list shows (by index): those in the block the view is zoomed into, or all.
+    pub fn visible_changes(&self) -> Vec<usize> {
+        let (Some(c), Some(m), Some(scope)) = (self.compare.as_ref(), self.m.as_ref(), self.scope()) else { return vec![] };
+        if self.scoped { crate::scope::changes_in(m, &c.diff.changes, scope) } else { (0..c.diff.changes.len()).collect() }
+    }
+
+    /// The list of changes is what the panel shows.
+    fn panel_shows_changes(&self) -> bool {
+        self.compare.is_some() && self.changes_open && self.selected.is_none() && self.removed_sel.is_none() && self.value.is_none()
+    }
+
+    /// The block in the diagram a marked change is: itself, or for a removed one the block it was in.
+    fn marked_block(&self) -> Option<u32> {
+        let c = self.compare.as_ref()?.diff.changes.get(self.marked?)?;
+        Some(if c.status == crate::diff::Status::Removed { c.at } else { c.id })
+    }
+
+    pub fn set_scoped(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.scoped = on;
+        self.settings.unscoped = !on;
+        self.settings.save();
+        self.sync_panel(cx);
+        cx.notify();
+    }
+
+    /// Marks a change (None: none): its block is outlined and pointed out for a moment, wherever it is, and its code unfolds in the list. The camera stays.
+    pub fn mark_change(&mut self, i: Option<usize>, cx: &mut Context<Self>) {
+        self.marked = i;
+        let block = self.marked_block();
+        self.peeked = block;
+        if let Some(b) = block {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(1200)).await;
+                let _ = this.update(cx, |v, cx| {
+                    if v.peeked == Some(b) {
+                        v.peeked = None;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
+        self.sync_panel(cx);
+        cx.notify();
+    }
+
+    /// Pans, without zooming, just far enough that a block is in view; one the camera is not anchored above is flown to. Not a step in the history.
+    pub fn reveal_node(&mut self, id: u32, cx: &mut Context<Self>) {
+        let Some(m) = self.m.clone() else { return };
+        if self.width == 0.0 {
             return;
         }
-        let i = match self.change_index() {
-            None => if delta > 0 { 0 } else { n - 1 },
-            Some(i) => ((i as i32 + delta).rem_euclid(n as i32)) as usize,
+        let target = m.canonical_path(id);
+        let Some(b) = self.camera.screen_box(&m, &target) else {
+            // Anchored at the block itself: it fills the view already.
+            if target != self.camera.path {
+                self.fly_to(&target, Framing::Open, 0.08, cx);
+            }
+            return;
         };
-        self.go_to_change(i, cx);
+        self.camera.insets = self.insets();
+        let (dx, dy) = crate::camera::pan_to_reveal(b, self.width, self.height, self.camera.insets, 24.0);
+        if dx == 0.0 && dy == 0.0 {
+            return;
+        }
+        let to = crate::camera::Xf { x: self.camera.xf.x + dx, y: self.camera.xf.y + dy, s: self.camera.xf.s };
+        let plan = self.camera.flight_to(&m, &self.camera.path.clone(), to, self.width, self.height);
+        self.framed = false;
+        self.flight = Some((Instant::now(), plan));
+        cx.notify();
+    }
+
+    /// The next (`delta` 1) or previous (-1) change from the one being read, round the list. With the
+    /// list in view, steps mark within it and keep the zoom; reading a change's details, they go to the next.
+    pub fn step_change(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let Some(total) = self.compare.as_ref().map(|c| c.diff.changes.len()) else { return };
+        let listing = self.panel_shows_changes();
+        let order: Vec<usize> = if listing { self.visible_changes() } else { (0..total).collect() };
+        if order.is_empty() {
+            return;
+        }
+        let at = if listing { self.marked } else { self.change_index() }.or(self.change_index()).and_then(|i| order.iter().position(|&o| o == i));
+        let n = order.len() as i32;
+        let next = match at {
+            None => if delta > 0 { 0 } else { order.len() - 1 },
+            Some(k) => (k as i32 + delta).rem_euclid(n) as usize,
+        };
+        let i = order[next];
+        if !listing {
+            return self.go_to_change(i, cx);
+        }
+        self.mark_change(Some(i), cx);
+        if let Some(c) = self.compare.as_ref().and_then(|c| c.diff.changes.get(i).copied()) {
+            self.reveal_node(if c.status == crate::diff::Status::Removed { c.at } else { c.id }, cx);
+        }
     }
 
     pub fn show_changes(&mut self, cx: &mut Context<Self>) {
@@ -761,8 +1022,12 @@ impl Viewer {
             m,
             content,
             hover: self.hover,
-            compare: self.compare.as_ref().map(|c| crate::panel::CompareView { diff: c.diff.clone(), kind: c.kind.clone(), label: c.label.clone(), title: c.title.clone() }),
+            compare: self.compare.as_ref().map(|c| crate::panel::CompareView { diff: c.diff.clone(), kind: c.kind.clone(), label: c.label.clone(), title: c.title.clone(), head_label: c.head_label.clone() }),
             change_index: self.change_index(),
+            visible: self.visible_changes(),
+            scope: self.scope().unwrap_or(0),
+            scoped: self.scoped,
+            marked: self.marked,
             ui: self.ui.clone(),
         };
         self.inspector.update(cx, |i, cx| i.set(Some(state), cx));
@@ -1010,6 +1275,10 @@ impl Viewer {
 
     /// The Compare menu's first item: the folder against its last commit.
     pub fn compare_uncommitted(&mut self, cx: &mut Context<Self>) {
+        if let (Some(_), Some(p)) = (&self.snapshot, &self.project) {
+            let folder = p.folder.clone();
+            return self.open_comparison(folder, Spec::Worktree, None, cx);
+        }
         if self.project.as_ref().is_some_and(|p| p.repo.is_some()) {
             self.start_compare("HEAD".into(), "Uncommitted changes".into(), "HEAD".into(), "Working tree vs HEAD".into(), cx);
         } else {
@@ -1091,7 +1360,7 @@ impl Viewer {
             width: self.width,
             height: self.height,
             hover: None,
-            selected: self.selected,
+            selected: self.selected.or(self.marked_block()),
             path: &self.camera.path,
             xfs: &xfs,
             related: related.as_ref(),
@@ -1218,6 +1487,11 @@ impl Viewer {
             self.crumbs = focus;
             if self.menu == Some(Menu::Crumbs) {
                 self.menu = None;
+            }
+            // The changes listed follow where the view is zoomed into.
+            if self.scoped && self.compare.is_some() && self.panel_shows_changes() {
+                let me = cx.entity();
+                cx.defer(move |cx| me.update(cx, |v, cx| v.sync_panel(cx)));
             }
             cx.notify();
         }
