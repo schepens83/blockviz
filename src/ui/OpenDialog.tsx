@@ -1,5 +1,5 @@
 import { FileCode, FolderOpen, Link2, Sparkles, X } from 'lucide-react';
-import { guessFilename } from '../core/loaders';
+import { canPickDirectory, guessFilename, type DirectoryHandle } from '../core/loaders';
 import { useEffect, useRef, useState } from 'react';
 import { TOUCH, useMedia } from './media';
 
@@ -7,6 +7,7 @@ export type OpenRequest =
   | { kind: 'example' }
   | { kind: 'github'; url: string }
   | { kind: 'folder'; files: FileList }
+  | { kind: 'directory'; handle: DirectoryHandle }
   | { kind: 'paste'; filename: string; text: string };
 
 export function OpenDialog({ onOpen, onClose, canClose, lastUrl }: { onOpen: (r: OpenRequest) => void; onClose: () => void; canClose: boolean; lastUrl: string }) {
@@ -19,6 +20,18 @@ export function OpenDialog({ onOpen, onClose, canClose, lastUrl }: { onOpen: (r:
   const folder = useRef<HTMLInputElement>(null);
   const urlInput = useRef<HTMLInputElement>(null);
   const touch = useMedia(TOUCH);
+  // Chrome and Edge open a folder without listing all of it first (and
+  // without asking to "upload" thousands of files); elsewhere, the file input.
+  const pickFolder = async () => {
+    if (!canPickDirectory() || touch) return folder.current?.click();
+    try {
+      const handle = await (window as unknown as { showDirectoryPicker(o?: { mode: 'read' }): Promise<DirectoryHandle> }).showDirectoryPicker({ mode: 'read' });
+      onOpen({ kind: 'directory', handle });
+    } catch (e) {
+      // Cancelled, or not allowed here (an iframe): the file input still works.
+      if ((e as Error).name !== 'AbortError') folder.current?.click();
+    }
+  };
   useEffect(() => {
     folder.current?.setAttribute('webkitdirectory', '');
     // On a phone, focusing would cover the choices with the keyboard.
@@ -44,7 +57,7 @@ export function OpenDialog({ onOpen, onClose, canClose, lastUrl }: { onOpen: (r:
             <Sparkles size={17} />
             <span><strong>nanoGPT example</strong><small>karpathy/nanoGPT, bundled</small></span>
           </button>
-          <button onClick={() => folder.current?.click()}>
+          <button onClick={() => void pickFolder()}>
             <FolderOpen size={17} />
             <span><strong>Local folder…</strong><small>{touch ? 'or files on this device' : 'or drop a folder anywhere'}</small></span>
           </button>

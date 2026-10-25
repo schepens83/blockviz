@@ -75,6 +75,8 @@ function parse(text: string, base: string): Rule[] {
 export interface Ignores {
   /** Whether a file at this path (as the folder lists it) is left out. */
   ignored(path: string): boolean;
+  /** Whether a directory is left out, with all it holds. */
+  ignoredDir(path: string): boolean;
   /** How many rules were read. */
   size: number;
 }
@@ -112,6 +114,7 @@ export function gitignores(files: [string, string][]): Ignores {
   };
   return {
     size: rules.length,
+    ignoredDir: (path: string) => rules.length > 0 && dirIgnored(path),
     ignored(path: string) {
       if (!rules.length) return false;
       const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
