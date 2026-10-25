@@ -65,7 +65,7 @@ The desktop app (`crates/blockviz-app`) can open straight into a comparison, and
 blockviz-app <repo> --compare <worktree|staged|branch|A..B|A...B|REV^!> [--title <text>]
 ```
 
-`staged` is what a commit would make (the index against HEAD), `worktree` the folder as it is against HEAD, `branch` this branch since it left the default branch, `A..B` two exact revisions `A...B` the second since it left the first, and `REV^!` just the change one commit made. `--title` names the comparison in the changes panel (a commit message). The app runs once: a second launch hands its request to the running window, over a Unix socket (`$XDG_RUNTIME_DIR/blockviz-app.sock`), raises it and exits.
+`staged` is what a commit would make (the index against HEAD), `worktree` the folder as it is against HEAD, `branch` this branch since it left the default branch, `A..B` two exact revisions, `A...B` the second since it left the first, and `REV^!` just the change one commit made. `--title` names the comparison in the changes panel (a commit message). The app runs once: a second launch hands its request to the running window, over a Unix socket (`$XDG_RUNTIME_DIR/blockviz-app.sock`), raises it and exits.
 
 `blockviz-app hook claude` is made for Claude Code's `PreToolUse` hook. It reads the hook's JSON from stdin and, when the Bash command runs `git commit` (also `git -C dir commit`, in `&&` chains; `-a` shows the working tree, otherwise what is staged; `-m` becomes the title), starts or reuses blockviz without waiting for it, and answers `ask`, so the agent asks you even in modes that would not. Any other command is left alone. Add to `~/.claude/settings.json`, with the path of your build:
 
