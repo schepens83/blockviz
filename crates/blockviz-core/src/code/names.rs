@@ -251,7 +251,7 @@ impl<'a> Namer<'a> {
             Expr::Name(_) => self.text(e),
             Expr::If(x) => {
                 let third = max.saturating_sub(10) / 3;
-                if self.src.lang.is_js() {
+                if self.src.lang.is_js() || self.src.lang == ast::Lang::Ruby {
                     format!("{} ? {} : {}", self.code(&x.test, third), self.code(&x.body, third), self.code(&x.orelse, third))
                 } else {
                     format!("{} if {} else {}", self.code(&x.body, third), self.code(&x.test, third), self.code(&x.orelse, third))
@@ -263,7 +263,7 @@ impl<'a> Namer<'a> {
                 let target = self.code(&n.target, max / 2);
                 if self.src.lang == ast::Lang::Rust {
                     format!("let {target} = {}", self.code(&n.value, max.saturating_sub(len(&target) + 7)))
-                } else if self.src.lang.is_js() {
+                } else if self.src.lang.is_js() || self.src.lang == ast::Lang::Ruby {
                     format!("{target} = {}", self.code(&n.value, max.saturating_sub(len(&target) + 3)))
                 } else {
                     format!("({target} := {})", self.code(&n.value, max.saturating_sub(len(&target) + 6)))
@@ -288,6 +288,7 @@ impl<'a> Namer<'a> {
             }
             Expr::UnaryOp(u) => {
                 let op = match u.op {
+                    ast::UnaryOp::Not if self.src.lang == ast::Lang::Ruby => "!",
                     ast::UnaryOp::Not => "not ",
                     ast::UnaryOp::TypeOf => "typeof ",
                     ast::UnaryOp::Void => "void ",
@@ -334,7 +335,10 @@ impl<'a> Namer<'a> {
             }
             Expr::Call(c) => {
                 let func = self.code(&c.func, max.saturating_sub(3));
-                if c.arguments.args.is_empty() && c.arguments.keywords.is_empty() {
+                // Ruby calls without arguments have no parentheses (`.first`, `.present?`).
+                if c.arguments.args.is_empty() && c.arguments.keywords.is_empty() && self.src.lang == ast::Lang::Ruby {
+                    func
+                } else if c.arguments.args.is_empty() && c.arguments.keywords.is_empty() {
                     format!("{func}()")
                 } else {
                     format!("{func}(…)")

@@ -2220,6 +2220,26 @@ impl<'c, 'p> Fb<'c, 'p> {
     /// own (`return None`, `return value`) is drawn as a step, so the arm
     /// shows what it does; the value flows through it to the result.
     fn ret(&mut self, s: &impl Ranged, value: Option<&'p Expr>, kind: &str) {
+        // A Rails action's response is its way out (`render plain`, `redirect_to …`),
+        // titled by what the client gets, with the values it sends.
+        if self.m.lang == Lang::Ruby {
+            if let (Some(v @ Expr::Call(c)), true) = (value, true) {
+                if let Some((title, caption)) = crate::ruby::rails::response(v, &self.src().text) {
+                    let mut g = Gather::default();
+                    let mut vals = vec![];
+                    for a in c.arguments.args.iter().chain(c.arguments.keywords.iter().map(|k| &k.value)) {
+                        if !is_literal(a) {
+                            vals.extend(self.collect(a, &mut g, false));
+                        }
+                    }
+                    let id = self.exit_step(s, kind, value, vals, &g);
+                    let n = self.cx.b.get_mut(id);
+                    n.title = title;
+                    n.subtitle = caption;
+                    return;
+                }
+            }
+        }
         let in_branch = self.in_branch();
         let Some(v) = value else {
             if in_branch {

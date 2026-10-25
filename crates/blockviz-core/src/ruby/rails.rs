@@ -384,3 +384,38 @@ pub fn view_role(path: &str) -> Option<&'static str> {
         "view"
     })
 }
+
+/// A controller's response, titled by what the client gets: `render plain`,
+/// `render new`, `redirect_to`, `head 404`, with what it says of it (the
+/// status, where a redirect goes).
+pub fn response(e: &Expr, src: &str) -> Option<(String, String)> {
+    let Expr::Call(c) = e else { return None };
+    let verb = match &*c.func {
+        Expr::Name(n) => n.id.as_str(),
+        Expr::Attribute(a) if matches!(&*a.value, Expr::Name(n) if n.id == "self") => a.attr.as_str(),
+        _ => return None,
+    };
+    let code = |e: &Expr| crate::text::clip(text(src, e.range()).trim_start_matches(':'), 40);
+    let status = keyword(c, "status").map(|s| format!("status {}", code(s))).unwrap_or_default();
+    Some(match verb {
+        "render" => {
+            const FORMATS: &[&str] = &["plain", "json", "html", "xml", "js", "body", "inline", "turbo_stream", "file"];
+            let what = match c.arguments.args.first().and_then(literal) {
+                Some(view) => view.to_string(),
+                None => match (keyword(c, "action").or_else(|| keyword(c, "template")).and_then(literal), keyword(c, "partial").and_then(literal)) {
+                    (Some(v), _) => v.to_string(),
+                    (None, Some(p)) => format!("partial {p}"),
+                    _ => c.arguments.keywords.iter().filter_map(|k| k.arg.as_deref()).find(|k| FORMATS.contains(k)).unwrap_or("").to_string(),
+                },
+            };
+            (if what.is_empty() { "render".into() } else { format!("render {what}") }, status)
+        }
+        "redirect_to" | "redirect_back" | "redirect_back_or_to" => {
+            let to = c.arguments.args.first().map(code).or_else(|| keyword(c, "fallback_location").map(code)).unwrap_or_default();
+            (verb.to_string(), [to, status].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
+        }
+        "head" => (c.arguments.args.first().map(|s| format!("head {}", code(s))).unwrap_or_else(|| "head".into()), String::new()),
+        "send_data" | "send_file" | "respond_with" => (verb.to_string(), status),
+        _ => return None,
+    })
+}

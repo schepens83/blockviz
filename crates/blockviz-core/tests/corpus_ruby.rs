@@ -296,3 +296,23 @@ fn mission_control_views_are_the_engines() {
     let app = edges_in(&s, dir(&s, "app/"));
     assert!(app.iter().any(|(f, t, l)| f == "views/" && t == "controllers/" && l == "template"), "{app:?}");
 }
+
+#[test]
+fn lobsters_actions_end_in_their_responses() {
+    let s = repo("lobsters");
+    let stories = def(&s, file(&s, "app/controllers/stories_controller.rb"), "StoriesController");
+    let upvote = def(&s, stories, "upvote");
+    // Guarded responses are exits titled by what the client gets; the last one too.
+    let exits: Vec<(&str, &str)> = descendants(&s, upvote).into_iter().filter(|n| n.title.starts_with("render")).map(|n| (n.title.as_str(), n.subtitle.as_str())).collect();
+    assert_eq!(exits, [("render plain", "status 400"), ("render plain", "status 400"), ("render plain", "")]);
+    let guard = descendants(&s, upvote).into_iter().find(|n| n.title == "render plain").unwrap();
+    assert!(guard.badges.iter().any(|b| b.starts_with("if !(@story = find_story)")), "{:?}", guard.badges);
+    // An action has no result: Rails ignores what it returns.
+    assert!(!descendants(&s, upvote).iter().any(|n| n.is_port() && n.title == "return"));
+    // Ruby's syntax in shortened code: no `not (…)`, `:=` or `()` (`where.not` is Active Record's).
+    for n in descendants(&s, file(&s, "app/controllers/comments_controller.rb")) {
+        for t in std::iter::once(&n.title).chain(&n.badges).chain(std::iter::once(&n.subtitle)) {
+            assert!(!t.contains(":=") && !t.starts_with("not ") && !t.contains(" not (") && !(t.contains("()") && t != "()"), "{t:?}");
+        }
+    }
+}

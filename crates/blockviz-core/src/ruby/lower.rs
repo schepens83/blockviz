@@ -240,12 +240,21 @@ impl<'a> Lower<'a> {
 
     /// An expression where `dest` says its value goes.
     fn value(&mut self, e: Expr, dest: &Dest, r: TextRange) -> Vec<Stmt> {
+        // In a controller, a response is the action's way out, wherever it is.
+        if self.responds() && super::rails::response(&e, self.src).is_some() && !matches!(dest, Dest::Assign(_)) {
+            return vec![Stmt::Return(StmtReturn { value: Some(Box::new(e)), range: r })];
+        }
         match dest {
             Dest::None => vec![Stmt::Expr(StmtExpr { value: Box::new(e), range: r })],
             Dest::Return if self.command(&e) => vec![Stmt::Expr(StmtExpr { value: Box::new(e), range: r })],
             Dest::Return => vec![Stmt::Return(StmtReturn { value: Some(Box::new(e)), range: r })],
             Dest::Assign(t) => vec![Stmt::Assign(StmtAssign { targets: vec![t.clone()], value: Box::new(e), range: r })],
         }
+    }
+
+    /// In a method of a controller (or a concern of one), where `render` responds.
+    fn responds(&self) -> bool {
+        !self.method.is_empty() && self.scope.last().is_some_and(|s| s.name.ends_with("Controller") || self.path.contains("controllers/"))
     }
 
     /// A call whose value the method ending with it does not return.
