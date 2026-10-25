@@ -37,6 +37,12 @@ fn file<'a>(s: &'a Scene, path: &str) -> &'a Node {
     s.nodes.iter().find(|n| matches!(n.kind, Kind::File) && n.span.as_ref().is_some_and(|sp| sp.file as usize == i)).unwrap_or_else(|| panic!("no node for {path}"))
 }
 
+/// The block drawn for a file, code or not.
+fn entry<'a>(s: &'a Scene, path: &str) -> &'a Node {
+    let i = s.files.iter().position(|f| f.path == path).unwrap_or_else(|| panic!("no file {path}"));
+    s.nodes.iter().find(|n| matches!(n.kind, Kind::File | Kind::Asset | Kind::Doc) && n.span.as_ref().is_some_and(|sp| sp.file as usize == i)).unwrap_or_else(|| panic!("no node for {path}"))
+}
+
 fn descendants<'a>(s: &'a Scene, n: &'a Node) -> Vec<&'a Node> {
     let mut out = vec![];
     for &c in &n.children {
@@ -263,4 +269,30 @@ fn lobsters_declarations_are_tables_and_roles() {
     assert_eq!(method(auth, "authenticate_user"), "before every action");
     let login = def(&s, file(&s, "app/controllers/login_controller.rb"), "LoginController");
     assert!(table(&s, login, "filters").rows.iter().any(|r| r.key == "skip clear_session_cookie"));
+}
+
+#[test]
+fn lobsters_views_are_what_actions_render() {
+    let s = repo("lobsters");
+    for (path, role) in [("app/views/stories/edit.html.erb", "view"), ("app/views/stories/_form.html.erb", "partial"), ("app/views/layouts/application.html.erb", "layout")] {
+        assert_eq!(entry(&s, path).subtitle, role, "{path}");
+    }
+    // Controllers render the views named after their actions (and `render action: "new"`):
+    // the views are drawn above the controllers.
+    let app = edges_in(&s, dir(&s, "app/"));
+    assert!(app.iter().any(|(f, t, l)| f == "views/" && t == "controllers/" && l == "template"), "{app:?}");
+    let views = dir(&s, "views/");
+    let linked: Vec<String> = std::iter::once(views).chain(descendants(&s, views)).flat_map(|n| n.edges.iter()).filter(|e| e.label == "template").map(|e| s.nodes[e.from as usize].title.clone()).collect();
+    for v in ["login/index.html.erb", "stories/", "users/", "comments/"] {
+        assert!(linked.iter().any(|l| l == v), "{v} not in {linked:?}");
+    }
+}
+
+#[test]
+fn mission_control_views_are_the_engines() {
+    let s = repo("mission_control-jobs");
+    assert_eq!(entry(&s, "app/views/mission_control/jobs/jobs/show.html.erb").subtitle, "view");
+    // `MissionControl::Jobs::JobsController#show` renders `mission_control/jobs/jobs/show`.
+    let app = edges_in(&s, dir(&s, "app/"));
+    assert!(app.iter().any(|(f, t, l)| f == "views/" && t == "controllers/" && l == "template"), "{app:?}");
 }

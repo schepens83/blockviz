@@ -318,3 +318,69 @@ pub fn table_decorator(title: &str, rows: &[(String, String, String)], at: TextR
 fn string(s: &str, at: TextRange) -> Expr {
     Expr::StringLiteral(ExprStringLiteral { value: s.to_string(), range: at })
 }
+
+/// The views an action of the controller at `path` (`mod/stories`) renders:
+/// `render :new`, `render action: "new"`, `render "stories/form"`,
+/// `render template: …`, and its own (`mod/stories/edit`), as paths under `app/views/`.
+pub fn templates(path: &str, action: &str, body: &[Stmt]) -> Vec<String> {
+    let mut out = vec![format!("{path}/{action}")];
+    let mut exprs = vec![];
+    crate::code::walk::stmt_exprs(body, true, &mut |e| exprs.push(e));
+    for e in exprs {
+        crate::code::walk::walk(e, &mut |x| {
+            let Expr::Call(c) = x else { return };
+            let render = match &*c.func {
+                Expr::Name(n) => n.id == "render",
+                Expr::Attribute(a) => a.attr == "render" && matches!(&*a.value, Expr::Name(n) if n.id == "self"),
+                _ => false,
+            };
+            if !render {
+                return;
+            }
+            let named = c.arguments.args.first().and_then(literal).map(str::to_string);
+            let t = match (named, keyword(c, "action").and_then(literal), keyword(c, "template").and_then(literal)) {
+                (_, _, Some(t)) => t.to_string(),
+                (_, Some(a), _) => format!("{path}/{a}"),
+                (Some(n), _, _) if n.contains('/') => n,
+                (Some(n), _, _) => format!("{path}/{n}"),
+                _ => return,
+            };
+            if !out.contains(&t) {
+                out.push(t);
+            }
+        });
+    }
+    out
+}
+
+pub fn template_decorator(view: &str, at: TextRange) -> Decorator {
+    let at = TextRange::empty(at.start());
+    Decorator { expression: Expr::Call(ExprCall { func: Box::new(Expr::Name(ExprName { id: "template".into(), ctx: Ctx::Load, range: at })), arguments: Arguments { args: vec![string(view, at)], keywords: vec![] }, kind: CallKind::Call, range: at }), range: at }
+}
+
+/// A view the front end found an action renders (`template("stories/edit")`).
+pub fn template(d: &Expr) -> Option<&str> {
+    let Expr::Call(c) = d else { return None };
+    match (&*c.func, c.arguments.args.first()) {
+        (Expr::Name(n), Some(Expr::StringLiteral(s))) if n.id == "template" => Some(&s.value),
+        _ => None,
+    }
+}
+
+/// A view by its place in an app: a layout, a partial or a view.
+pub fn view_role(path: &str) -> Option<&'static str> {
+    let i = path.find("app/views/").map(|i| i + "app/views/".len()).or_else(|| path.starts_with("views/").then_some(6))?;
+    let rest = &path[i..];
+    let base = rest.rsplit('/').next().unwrap_or(rest);
+    let ext = base.split_once('.').map(|(_, e)| e).unwrap_or("");
+    if !["erb", "haml", "slim", "builder", "jbuilder", "rabl"].iter().any(|x| ext.ends_with(x)) {
+        return None;
+    }
+    Some(if rest.starts_with("layouts/") {
+        "layout"
+    } else if base.starts_with('_') {
+        "partial"
+    } else {
+        "view"
+    })
+}

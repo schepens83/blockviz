@@ -387,7 +387,8 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
         {
             let n = b.get_mut(id);
             n.category = category;
-            n.subtitle = e.language.to_string();
+            // A Rails view, partial or layout says which.
+            n.subtitle = crate::ruby::rails::view_role(&e.path).unwrap_or(e.language).to_string();
             n.span = e.read.as_ref().map(|r| Span { file: i as u32, start: 0, end: r.len as u32, line: 1, end_line: metas[i].lines.max(1) });
         }
         let Some(read) = e.read.as_mut() else {
@@ -754,7 +755,10 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
         }
         let name = name.trim_start_matches('/');
         let (templates, nested) = (format!("templates/{name}"), format!("/{name}"));
-        let hits: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| e.path.ends_with(&templates) || (name.contains('/') && e.path.ends_with(&nested))).map(|(i, _)| i).collect();
+        // Rails names views without their formats and handlers (`app/views/stories/edit`
+        // is `edit.html.erb`), under the app or engine of the controller.
+        let rails = |p: &str| name.starts_with("app/views/") && p.split_once(name).is_some_and(|(_, rest)| rest.starts_with('.') && !rest[1..].contains('/')) && (p.starts_with(name) || p.contains(&format!("/{name}")));
+        let hits: Vec<usize> = entries.iter().enumerate().filter(|(_, e)| rails(&e.path) || !name.starts_with("app/views/") && (e.path.ends_with(&templates) || (name.contains('/') && e.path.ends_with(&nested)))).map(|(i, _)| i).collect();
         let module_dir = entries[*module as usize].path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
         // Prefer the template next to the view (a Flask app or Django app directory).
         let t = match hits.as_slice() {

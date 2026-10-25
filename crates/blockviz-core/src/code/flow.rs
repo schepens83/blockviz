@@ -3144,6 +3144,11 @@ impl<'c, 'p> Fb<'c, 'p> {
                 role.get_or_insert(frameworks::Role { label: label.to_string(), kind: Handler::Hook });
                 continue;
             }
+            // and the views an action renders.
+            if let (Lang::Ruby, Some(view)) = (self.m.lang, crate::ruby::rails::template(&d.expression)) {
+                self.cx.relations.push(Relation::Template { module: self.mi, name: format!("app/views/{view}") });
+                continue;
+            }
             match frameworks::role(&d.expression, def.name, &self.cx.prefixes[&mi], class_prefix.as_deref(), |e| namer.code(e, 24)) {
                 Some(r) if role.is_none() => role = Some(r),
                 Some(_) => {}

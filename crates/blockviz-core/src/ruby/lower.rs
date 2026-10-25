@@ -653,6 +653,9 @@ impl<'a> Lower<'a> {
         let mut nested = vec![];
         let mut badges: Vec<&str> = vec![];
         let mut abstract_ = false;
+        // Methods after `private` (or named by it), which are no controller's actions.
+        let mut private = false;
+        let mut hidden: Vec<String> = vec![];
         let nodes: Vec<Node<'_>> = match body {
             Some(b) => match b.as_statements_node() {
                 Some(s) => s.body().iter().collect(),
@@ -663,7 +666,13 @@ impl<'a> Lower<'a> {
         for s in &nodes {
             match s {
                 Node::ClassNode { .. } | Node::ModuleNode { .. } => nested.extend(self.class(s)),
-                Node::DefNode { .. } => own.push(Stmt::FunctionDef(self.def(&s.as_def_node().unwrap(), false))),
+                Node::DefNode { .. } => {
+                    let f = self.def(&s.as_def_node().unwrap(), false);
+                    if private {
+                        hidden.push(f.name.clone());
+                    }
+                    own.push(Stmt::FunctionDef(f));
+                }
                 Node::SingletonClassNode { .. } => {
                     let sc = s.as_singleton_class_node().unwrap();
                     self.scope.last_mut().unwrap().singleton = true;
@@ -685,6 +694,15 @@ impl<'a> Lower<'a> {
                 Node::CallNode { .. } => {
                     let c = s.as_call_node().unwrap();
                     let method = text(&c.name());
+                    if c.receiver().is_none() && matches!(method.as_str(), "private" | "protected" | "public") {
+                        let args: Vec<Node<'_>> = c.arguments().map(|a| a.arguments().iter().collect()).unwrap_or_default();
+                        if args.is_empty() {
+                            private = method != "public";
+                        } else if method != "public" {
+                            // `private def x` and `private :x, :y`.
+                            hidden.extend(args.iter().filter_map(|a| a.as_def_node().map(|d| text(&d.name())).or_else(|| string_value(a))));
+                        }
+                    }
                     if c.receiver().is_none() && matches!(method.as_str(), "include" | "extend" | "prepend") {
                         for a in c.arguments().map(|a| a.arguments().iter().collect::<Vec<_>>()).unwrap_or_default() {
                             match constant_text(&a).as_deref() {
@@ -716,6 +734,19 @@ impl<'a> Lower<'a> {
             if let Stmt::FunctionDef(f) = s {
                 if let Some((_, label)) = decl.roles.iter().find(|(m, _)| *m == f.name) {
                     f.decorators.push(super::rails::role_decorator(label, f.range));
+                }
+            }
+        }
+        // A controller's actions render the views named after them, unless they render others.
+        if !is_module && full.ends_with("Controller") {
+            let path = super::underscore(full.trim_end_matches("Controller"));
+            for s in &mut own {
+                if let Stmt::FunctionDef(f) = s {
+                    if f.kind == DefKind::Method && !hidden.contains(&f.name) {
+                        for t in super::rails::templates(&path, &f.name, &f.body) {
+                            f.decorators.push(super::rails::template_decorator(&t, f.range));
+                        }
+                    }
                 }
             }
         }
