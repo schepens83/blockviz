@@ -3,7 +3,7 @@
 //! across as down (the renderer scales text).
 
 use crate::pen::{Align, Family, Font, Pen};
-use crate::theme::{Color, MONO_FONT, SANS};
+use crate::theme::{mono_font, Color, SANS};
 use std::f64::consts::PI;
 
 #[derive(Clone)]
@@ -316,7 +316,7 @@ impl Pen for SvgPen<'_> {
 pub fn screen_family(f: Family) -> &'static str {
     match f {
         Family::Sans => SANS,
-        Family::Mono => MONO_FONT,
+        Family::Mono => mono_font(),
     }
 }
 

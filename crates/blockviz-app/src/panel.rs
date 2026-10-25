@@ -10,7 +10,7 @@ use crate::linediff::{diff_lines, fold, OpKind, Row};
 use crate::model::Model;
 use crate::render::EdgeId;
 use crate::shell::{ico, icon_button, kbd};
-use crate::theme::{Ui, MONO_FONT, UI_FONT};
+use crate::theme::{mono_font, Ui, UI_FONT};
 use crate::viewer::Viewer;
 use blockviz_core::ir::{Kind, Shape, Span};
 use gpui::{div, prelude::*, px, AnyElement, App, Context, FontWeight, ScrollHandle, SharedString, Stateful, StyledText, TextRun, WeakEntity, Window};
@@ -206,7 +206,7 @@ impl Inspector {
                     .child(div().flex().text_size(px(11.0)).text_color(ui.faint).font_weight(FontWeight::SEMIBOLD).child(kind.to_uppercase()).when_some(sub, |d, s| d.child(div().font_weight(FontWeight::MEDIUM).child(format!(" · {s}")))))
                     .child(icon_button("close", "x", 15.0, 30.0, "Close details", ui, true).debug_selector(|| "panel-close".into()).on_click(cx.listener(move |this, _, _, cx| this.act(cx, close)))),
             )
-            .child(div().mt(px(2.0)).mb(px(6.0)).font_weight(FontWeight(650.0)).text_size(px(if mono { 14.5 } else { 18.0 })).when(mono, |d| d.font_family(MONO_FONT)).child(title))
+            .child(div().mt(px(2.0)).mb(px(6.0)).font_weight(FontWeight(650.0)).text_size(px(if mono { 14.5 } else { 18.0 })).when(mono, |d| d.font_family(mono_font())).child(title))
             .into_any_element()
     }
 
@@ -246,7 +246,7 @@ impl Inspector {
             return None;
         }
         let ui = &self.ui;
-        let chips = values.iter().map(|v| div().px(px(7.0)).py(px(2.0)).rounded(px(5.0)).bg(ui.chip).text_color(ui.chip_ink).text_size(px(if mono { 11.5 } else { 12.0 })).when(mono, |d| d.font_family(MONO_FONT)).child(v.clone()));
+        let chips = values.iter().map(|v| div().px(px(7.0)).py(px(2.0)).rounded(px(5.0)).bg(ui.chip).text_color(ui.chip_ink).text_size(px(if mono { 11.5 } else { 12.0 })).when(mono, |d| d.font_family(mono_font())).child(v.clone()));
         Some(div().my(px(10.0)).child(self.label(label.to_uppercase(), None)).child(div().flex().flex_wrap().gap(px(5.0)).children(chips)).into_any_element())
     }
 
@@ -274,7 +274,7 @@ impl Inspector {
                 }))
                 .on_click(cx.listener(move |this, _, _, cx| this.act(cx, move |v, cx| go(v, id, cx))))
                 .child(div().flex().min_w_0().truncate().font_weight(FontWeight(550.0)).child(r.name).when_some(r.dim, |d, t| d.child(div().font_weight(FontWeight::NORMAL).text_color(ui.faint).child(t))))
-                .when_some(r.at, |d, at| d.child(div().flex_none().font_family(MONO_FONT).text_size(px(11.0)).text_color(ui.faint).child(at)))
+                .when_some(r.at, |d, at| d.child(div().flex_none().font_family(mono_font()).text_size(px(11.0)).text_color(ui.faint).child(at)))
         });
         div().flex().flex_col().border_1().border_color(ui.line).rounded(px(8.0)).overflow_hidden().children(list).into_any_element()
     }
@@ -316,7 +316,7 @@ impl Inspector {
 
     fn source_label(&self, file: &str, rest: String) -> AnyElement {
         let ui = &self.ui;
-        div().mt(px(14.0)).mb(px(5.0)).flex().flex_wrap().font_family(MONO_FONT).text_size(px(11.0)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).child(file.to_string()).child(div().text_color(ui.faint).child(rest)).into_any_element()
+        div().mt(px(14.0)).mb(px(5.0)).flex().flex_wrap().font_family(mono_font()).text_size(px(11.0)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).child(file.to_string()).child(div().text_color(ui.faint).child(rest)).into_any_element()
     }
 
     // ----- source -----------------------------------------------------------------------
@@ -328,7 +328,7 @@ impl Inspector {
             .bg(ui.code_bg)
             .border_x_1()
             .border_color(ui.line)
-            .font_family(MONO_FONT)
+            .font_family(mono_font())
             .text_size(px(11.5))
             .line_height(px(18.4))
             .text_color(ui.code_ink)
@@ -343,7 +343,7 @@ impl Inspector {
     #[allow(clippy::too_many_arguments)]
     fn code_line(&self, line: &Line, digits: usize, sign: Option<OpKind>, marked: bool, tinted: bool, click: Option<(u32, u32)>, id: usize, cx: &mut Context<Self>) -> AnyElement {
         let ui = &self.ui;
-        let font = gpui::font(MONO_FONT);
+        let font = gpui::font(mono_font());
         let indent = line.indent();
         let mut text = String::new();
         let mut runs = vec![];
@@ -626,7 +626,7 @@ impl Inspector {
                 if r.heading {
                     div().mt(px(6.0)).mb(px(2.0)).text_size(px(10.5)).font_weight(FontWeight::BOLD).text_color(ui.heading).child(r.key.to_uppercase())
                 } else {
-                    div().py(px(1.5)).flex().flex_wrap().font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.muted).child(div().text_color(ui.ink).child(r.key.clone())).when(!r.value.is_empty(), |d| d.child(format!(" = {}", r.value)))
+                    div().py(px(1.5)).flex().flex_wrap().font_family(mono_font()).text_size(px(11.5)).text_color(ui.muted).child(div().text_color(ui.ink).child(r.key.clone())).when(!r.value.is_empty(), |d| d.child(format!(" = {}", r.value)))
                 }
             });
             body.push(
@@ -641,7 +641,7 @@ impl Inspector {
         let view = m.source_view(node).filter(|v| m.file_text(v.span.file).is_some());
         let Some(view) = view else {
             if !node.code.is_empty() {
-                body.push(div().mt(px(14.0)).px(px(12.0)).py(px(10.0)).bg(ui.code_bg).border_1().border_color(ui.line).rounded(px(8.0)).font_family(MONO_FONT).text_size(px(11.5)).line_height(px(18.4)).child(node.code.clone()).into_any_element());
+                body.push(div().mt(px(14.0)).px(px(12.0)).py(px(10.0)).bg(ui.code_bg).border_1().border_color(ui.line).rounded(px(8.0)).font_family(mono_font()).text_size(px(11.5)).line_height(px(18.4)).child(node.code.clone()).into_any_element());
             }
             return;
         };
@@ -779,7 +779,7 @@ impl Inspector {
             v.sync_panel(cx);
             cx.notify();
         }));
-        let code = |t: String| div().font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.muted).bg(ui.chip).px(px(5.0)).py(px(1.0)).rounded(px(4.0)).truncate().child(t);
+        let code = |t: String| div().font_family(mono_font()).text_size(px(11.5)).text_color(ui.muted).bg(ui.chip).px(px(5.0)).py(px(1.0)).rounded(px(4.0)).truncate().child(t);
         body.push(
             div()
                 .flex()
@@ -937,7 +937,7 @@ impl Inspector {
                                     });
                                 }))
                                 .child(div().flex().min_w_0().truncate().font_weight(FontWeight(550.0)).child(name).child(div().font_weight(FontWeight::NORMAL).text_color(ui.faint).child(format!(" · {}", info.kind.to_lowercase()))))
-                                .when_some(info.line, |d, l| d.child(div().flex_none().font_family(MONO_FONT).text_size(px(11.0)).text_color(ui.faint).child(l.to_string()))),
+                                .when_some(info.line, |d, l| d.child(div().flex_none().font_family(mono_font()).text_size(px(11.0)).text_color(ui.faint).child(l.to_string()))),
                         )
                         .child(
                             icon_button(("zoom-to", i), "crosshair", 13.0, 26.0, "Zoom to it", &ui, true)
@@ -963,7 +963,7 @@ impl Inspector {
             body.push(
                 div()
                     .my(px(10.0))
-                    .child(div().flex().items_center().gap(px(6.0)).mb(px(5.0)).font_family(MONO_FONT).text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).when_some(*mark, |dv, m| dv.child(self.file_mark_el(m))).child(if file.is_empty() { "Repository".to_string() } else { file.clone() }))
+                    .child(div().flex().items_center().gap(px(6.0)).mb(px(5.0)).font_family(mono_font()).text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).when_some(*mark, |dv, m| dv.child(self.file_mark_el(m))).child(if file.is_empty() { "Repository".to_string() } else { file.clone() }))
                     .child(div().flex().flex_col().border_1().border_color(ui.line).rounded(px(8.0)).overflow_hidden().children(rows))
                     .into_any_element(),
             );
@@ -974,7 +974,7 @@ impl Inspector {
         let others: Vec<crate::compare::FileChange> = if narrowed { crate::scope::files_in(&m, &rest, s.scope).into_iter().cloned().collect() } else { rest };
         if !others.is_empty() {
             let rows = others.iter().map(|f| div().flex().items_center().truncate().child(self.file_mark_el(file_mark(f.status))).child(format!("{}{}", f.previous.as_ref().map(|p| format!("{p} → ")).unwrap_or_default(), f.path)));
-            body.push(div().my(px(10.0)).child(self.label("ALSO CHANGED", Some(others.len()))).child(div().flex().flex_col().gap(px(3.0)).font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.muted).children(rows)).into_any_element());
+            body.push(div().my(px(10.0)).child(self.label("ALSO CHANGED", Some(others.len()))).child(div().flex().flex_col().gap(px(3.0)).font_family(mono_font()).text_size(px(11.5)).text_color(ui.muted).children(rows)).into_any_element());
         }
     }
 

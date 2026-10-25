@@ -123,6 +123,18 @@ fn draw_svg(folder: &std::path::Path, out: &str, at: Option<&str>, dark: bool, (
     println!("wrote {out}");
 }
 
+/// Fontconfig's choice of monospace font (Linux only).
+fn system_monospace() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let out = std::process::Command::new("fc-match").args(["-f", "%{family[0]}", "monospace"]).output().ok()?;
+        let name = String::from_utf8(out.stdout).ok()?;
+        return Some(name.trim().to_string()).filter(|n| !n.is_empty());
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
@@ -155,6 +167,7 @@ fn main() {
     };
 
     Application::new().with_assets(icons::Icons).run(move |cx: &mut App| {
+        theme::init_mono_font(theme::pick_mono_font(&cx.text_system().all_font_names(), system_monospace()));
         input::bind_keys(cx);
         menus::bind(cx);
         cx.on_action(|_: &menus::Quit, cx| cx.quit());

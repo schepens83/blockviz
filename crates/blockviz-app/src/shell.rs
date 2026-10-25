@@ -8,7 +8,7 @@ use crate::menus;
 use crate::icons::icon;
 use crate::pen::Pen;
 use crate::render::drawn_in;
-use crate::theme::{Color, Ui, LEGEND, MONO_FONT, UI_FONT};
+use crate::theme::{mono_font, Color, Ui, LEGEND, UI_FONT};
 use crate::viewer::{dragged_width, Dialog, Menu, Viewer, PANEL_W};
 use blockviz_core::ir::EdgeKind;
 use gpui::{
@@ -56,7 +56,7 @@ pub fn icon_button(id: impl Into<gpui::ElementId>, name: &str, size: f32, side: 
 }
 
 pub fn kbd(text: &str, ui: &Ui) -> gpui::Div {
-    div().font_family(MONO_FONT).text_size(px(11.0)).text_color(ui.faint).border_1().border_color(ui.line).rounded(px(4.0)).px(px(5.0)).py(px(1.0)).bg(ui.code_bg).child(text.to_string())
+    div().font_family(mono_font()).text_size(px(11.0)).text_color(ui.faint).border_1().border_color(ui.line).rounded(px(4.0)).px(px(5.0)).py(px(1.0)).bg(ui.code_bg).child(text.to_string())
 }
 
 /// A small drawing made with the diagram's own pen (the legend's samples).
@@ -170,7 +170,7 @@ impl Viewer {
                             div()
                                 .flex()
                                 .gap(px(5.0))
-                                .font_family(MONO_FONT)
+                                .font_family(mono_font())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_size(px(11.5))
                                 .whitespace_nowrap()
@@ -403,7 +403,7 @@ impl Viewer {
                     for (i, c) in self.log.iter().enumerate() {
                         let (sha, subject) = (c.sha.clone(), c.subject.clone());
                         menu = menu.child(
-                            self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
+                            self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(mono_font()).text_size(px(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
                                 .on_click(cx.listener(move |v, _, _, cx| v.compare_commit(sha.clone(), subject.clone(), cx))),
                         );
                     }

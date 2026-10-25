@@ -451,15 +451,60 @@ impl Ui {
 
 /// The interface font: `-apple-system`, as the web asks for it.
 pub const UI_FONT: &str = ".SystemUIFont";
-/// The code font: the web asks for "SF Mono", ui-monospace; GPUI reaches the
-/// system's monospace by this name (see `fonts_resolve`).
-pub const MONO_FONT: &str = "Menlo";
+/// The code font, once startup has picked it (see `init_mono_font`).
+static MONO_FONT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The code font: what `init_mono_font` set, else "Menlo" (tests, export).
+pub fn mono_font() -> &'static str {
+    MONO_FONT.get().map(String::as_str).unwrap_or("Menlo")
+}
+
+/// Sets the code font, once; later calls are ignored.
+pub fn init_mono_font(name: String) {
+    let _ = MONO_FONT.set(name);
+}
+
+/// The first installed monospace font: SF Mono, Menlo, fontconfig's choice,
+/// then common ones. Menlo when none is installed (gpui falls back itself).
+pub fn pick_mono_font(installed: &[String], system_monospace: Option<String>) -> String {
+    let has = |n: &str| installed.iter().any(|i| i == n);
+    let fixed = ["SF Mono", "Menlo"].into_iter().map(String::from);
+    let later = ["JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", "Ubuntu Mono", "Consolas", "Courier New"].into_iter().map(String::from);
+    fixed.chain(system_monospace).chain(later).find(|n| has(n)).unwrap_or_else(|| "Menlo".to_string())
+}
 /// The diagram's names (theme.ts).
 pub const SANS: &str = "Helvetica Neue";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn mono_font_follows_fontconfig_on_linux() {
+        let installed = names(&["Adwaita Mono", "JetBrainsMono Nerd Font", "Liberation Mono"]);
+        assert_eq!(pick_mono_font(&installed, Some("JetBrainsMono Nerd Font".into())), "JetBrainsMono Nerd Font");
+    }
+
+    #[test]
+    fn mono_font_prefers_menlo_on_a_mac() {
+        let installed = names(&["Helvetica", "Menlo", "Courier New"]);
+        assert_eq!(pick_mono_font(&installed, None), "Menlo");
+    }
+
+    #[test]
+    fn mono_font_is_menlo_when_nothing_matches() {
+        assert_eq!(pick_mono_font(&names(&["Comic Sans"]), Some("Nope".into())), "Menlo");
+    }
+
+    #[test]
+    fn mono_font_skips_a_fontconfig_answer_that_is_not_installed() {
+        let installed = names(&["DejaVu Sans Mono", "Liberation Mono"]);
+        assert_eq!(pick_mono_font(&installed, Some("Ghost".into())), "DejaVu Sans Mono");
+    }
 
     #[test]
     fn night_colors_match_the_web() {
