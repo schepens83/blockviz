@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, GitPullRequest, Home, Info, Link, Maximize, Minus, Moon, Plus, Search as SearchIcon, Split, Sun, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Analyzer } from './core/analyzer';
-import { droppedProject, exampleProject, folderProject, githubComparison, githubProject, isComparison, MAX_FILES, MAX_TOTAL, parseGitHub, pastedProject, type Progress } from './core/loaders';
+import { directoryProject, droppedProject, exampleProject, folderProject, githubComparison, githubProject, isComparison, MAX_FILES, MAX_TOTAL, parseGitHub, pastedProject, type Progress } from './core/loaders';
 import type { Comparison, Project, Scene } from './core/types';
 import { SceneDiff } from './canvas/diff';
 import { Engine, type EdgeRef, type ViewState } from './canvas/engine';
@@ -204,6 +204,7 @@ export default function App() {
       void load((p, signal) => fromGitHub(r.url, p, signal, true));
     }
     if (r.kind === 'folder') void load(p => folderProject(r.files, p));
+    if (r.kind === 'directory') void load(p => directoryProject(r.handle, p));
     if (r.kind === 'paste') void load(async () => pastedProject(r.filename, r.text));
   }, [load]);
 

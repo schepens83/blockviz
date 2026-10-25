@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryCache } from './cache';
-import { fileChanges, firstFiles, githubComparison, githubProject, guessFilename, ignoredPath, isComparison, isTestPath, parseGitHub, pastedProject, readable } from './loaders';
+import { directoryProject, type DirectoryHandle, fileChanges, firstFiles, githubComparison, githubProject, guessFilename, ignoredPath, isComparison, isTestPath, parseGitHub, pastedProject, readable } from './loaders';
 
 describe('pasted code', () => {
   it('is Python unless it uses JavaScript syntax', () => {
@@ -252,5 +252,39 @@ describe('GitHub pull requests', () => {
     await cache.put({ key: 'github.com/o/r', name: 'r', source: 'github.com/o/r', saved: 0, files: [{ path: 'a.py', text: 'x = 1', bytes: 5, sha: 'sha-x = 1' }, { path: 'b.py', text: 'y = 2', bytes: 5, sha: 'sha-y = 2' }] });
     await githubComparison('o/r/pull/7', () => {}, { cache, now: () => 0 });
     expect(calls.filter(u => u.includes('raw.githubusercontent'))).toEqual(['https://raw.githubusercontent.com/o/r/H/b.py']);
+  });
+});
+
+describe('a folder opened with showDirectoryPicker', () => {
+  // A folder as the File System Access API hands it over, which notes what is opened.
+  const opened: string[] = [];
+  const folder = (name: string, tree: Record<string, unknown>, at = name): DirectoryHandle => ({
+    kind: 'directory',
+    name,
+    async *values() {
+      opened.push(at);
+      for (const [n, v] of Object.entries(tree)) {
+        if (typeof v === 'string') yield { kind: 'file' as const, name: n, getFile: async () => new File([v], n) };
+        else yield folder(n, v as Record<string, unknown>, `${at}/${n}`);
+      }
+    },
+  });
+
+  it('never opens what its .gitignore files leave out', async () => {
+    opened.length = 0;
+    const app = folder('shop', {
+      '.gitignore': '/tmp\n/log/*\n!/log/.keep\n',
+      Gemfile: 'gem "rails"\n',
+      app: { models: { 'user.rb': 'class User < ApplicationRecord\nend\n' }, javascript: { '.gitignore': 'builds/\n', builds: { 'app.js': 'x' }, 'index.js': 'export {}' } },
+      tmp: { cache: { 'a': 'x' } },
+      log: { '.keep': '', 'development.log': 'x' },
+      node_modules: { left: { 'index.js': 'x' } },
+    });
+    const p = await directoryProject(app, () => {});
+    expect(p.name).toBe('shop');
+    expect(p.files.map(f => f.path).sort()).toEqual(['shop/.gitignore', 'shop/Gemfile', 'shop/app/javascript/.gitignore', 'shop/app/javascript/index.js', 'shop/app/models/user.rb', 'shop/log/.keep']);
+    expect(opened).not.toContain('shop/tmp');
+    expect(opened).not.toContain('shop/node_modules');
+    expect(opened).not.toContain('shop/app/javascript/builds');
   });
 });

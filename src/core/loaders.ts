@@ -109,6 +109,51 @@ export async function folderProject(list: FileList, progress: Progress): Promise
   return { name, ...(await readFiles(entries, progress)), source: 'local folder' };
 }
 
+/** What `showDirectoryPicker` hands back, as far as reading a folder needs. */
+export interface DirectoryHandle {
+  kind: 'directory';
+  name: string;
+  values(): AsyncIterable<DirectoryHandle | FileHandle>;
+}
+
+interface FileHandle {
+  kind: 'file';
+  name: string;
+  getFile(): Promise<File>;
+}
+
+/**
+ * From the File System Access API (`showDirectoryPicker`): the folder is
+ * walked here, not listed whole by the browser first, so folders its
+ * `.gitignore` files leave out (`tmp/`, `log/`, uploads) are never opened.
+ */
+export async function directoryProject(root: DirectoryHandle, progress: Progress): Promise<Project> {
+  const entries: { path: string; file: () => Promise<File> }[] = [];
+  const ignoreFiles: [string, string][] = [];
+  const walk = async (dir: DirectoryHandle, path: string): Promise<void> => {
+    const children: (DirectoryHandle | FileHandle)[] = [];
+    for await (const c of dir.values()) children.push(c);
+    // A folder's own `.gitignore` decides about what is beside it.
+    const own = children.find((c): c is FileHandle => c.kind === 'file' && c.name === '.gitignore');
+    if (own) ignoreFiles.push([`${path}/.gitignore`, await (await own.getFile()).text()]);
+    const ignores = gitignores(ignoreFiles);
+    for (const c of children) {
+      const p = `${path}/${c.name}`;
+      if (c.kind === 'file') {
+        entries.push({ path: p, file: () => c.getFile() });
+      } else if (!IGNORED.has(c.name) && !ignores.ignoredDir(p)) {
+        if (entries.length % 200 === 0) progress(`Listing files… ${entries.length}`);
+        await walk(c, p);
+      }
+    }
+  };
+  await walk(root, root.name);
+  return { name: root.name, ...(await readFiles(entries, progress)), source: 'local folder' };
+}
+
+/** Whether this browser can open a folder with `showDirectoryPicker`. */
+export const canPickDirectory = () => typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+
 /** From a drag-and-drop of files and/or folders. */
 export async function droppedProject(items: DataTransferItemList, progress: Progress): Promise<Project> {
   // Every file is listed before any is opened, so that the limits are spent on the code.
