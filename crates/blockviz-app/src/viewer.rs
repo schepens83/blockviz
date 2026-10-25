@@ -659,6 +659,15 @@ impl Viewer {
         cx.notify();
     }
 
+    /// "Since a commit": that commit's own changes and all that came after, up to the folder as it is, so the base is
+    /// what came before it (nothing, for the first commit).
+    pub fn compare_since(&mut self, sha: String, short: String, subject: String, cx: &mut Context<Self>) {
+        let Some(repo) = self.project.as_ref().and_then(|p| p.repo.clone()) else { return };
+        let before = repo.parent_of(&sha);
+        let label = if before == git::NOTHING { "nothing".to_string() } else { format!("{short}^") };
+        self.start_compare(before, "Since a commit (including it)".into(), label, subject, cx);
+    }
+
     /// "This branch": everything since the branch left the default branch.
     pub fn compare_branch(&mut self, cx: &mut Context<Self>) {
         // A snapshot is not the folder: go back to it first.

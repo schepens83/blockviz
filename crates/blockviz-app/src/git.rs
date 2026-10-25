@@ -13,6 +13,9 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// The revision before a history began: it has no files, so everything since is new. Not a valid ref name.
+pub const NOTHING: &str = "(nothing)";
+
 /// A repository, seen from a folder in it.
 #[derive(Clone, Debug)]
 pub struct Repo {
@@ -68,6 +71,12 @@ impl Repo {
         self.git(&["merge-base", "--end-of-options", a, b])
     }
 
+    /// The revision before commit `sha`: its first parent, or `NOTHING` for the first commit of a history.
+    pub fn parent_of(&self, sha: &str) -> String {
+        let parent = format!("{sha}^");
+        if self.resolve(&parent).is_some() { parent } else { NOTHING.to_string() }
+    }
+
     /// The commit `rev` names, as a full sha.
     pub fn resolve(&self, rev: &str) -> Option<String> {
         self.git(&["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{rev}^{{commit}}")])
@@ -93,6 +102,9 @@ impl Repo {
     /// symbolic links are not files here.
     pub fn files_at(&self, rev: &str) -> Files {
         let mut files = Files::new();
+        if rev == NOTHING {
+            return files;
+        }
         let Some(sha) = self.resolve(rev) else { return files };
         let Some(tree) = run(&self.root, &["ls-tree", "-r", "-z", "--long", &format!("{sha}:{}", self.prefix)]) else { return files };
         let mut wanted = vec![];
@@ -398,6 +410,39 @@ mod tests {
         assert_eq!(changes(&repo.files_at("HEAD"), &staged), [c("a.py", FileStatus::Modified, None), c("b.py", FileStatus::Added, None), c("logo.bin", FileStatus::Added, None), c("pkg/c.py", FileStatus::Added, None)]);
         // From a subfolder: its own files, by path within it.
         assert_eq!(keys(&Repo::find(&dir.join("pkg")).unwrap().index_files()), ["c.py"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn since_a_commit_includes_that_commit() {
+        let dir = std::env::temp_dir().join(format!("blockviz-since-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        let repo = Repo::find(&dir).unwrap();
+        let commit = |msg: &str| {
+            git(&dir, &["add", "-A"]);
+            git(&dir, &["commit", "-q", "-m", msg]);
+            repo.resolve("HEAD").unwrap()
+        };
+        write(&dir, "a.py", "a = 1\n");
+        let first = commit("one");
+        write(&dir, "b.py", "b = 1\n");
+        write(&dir, "a.py", "a = 2\n");
+        let second = commit("two");
+        write(&dir, "c.py", "c = 1\n");
+        let third = commit("three");
+        let c = |p: &str, s| FileChange { path: p.into(), status: s, previous: None };
+        let head = live::read(&dir);
+        // Picking the middle commit: its own edits and the later ones, the commit itself not left out.
+        let base = repo.files_at(&repo.parent_of(&second));
+        assert_eq!(changes(&base, &head), [c("a.py", FileStatus::Modified), c("b.py", FileStatus::Added), c("c.py", FileStatus::Added)]);
+        // The last one: just what it made.
+        assert_eq!(changes(&repo.files_at(&repo.parent_of(&third)), &head), [c("c.py", FileStatus::Added)]);
+        // The first has no parent: before it there was nothing, so everything is new.
+        assert_eq!(repo.parent_of(&first), NOTHING);
+        assert!(repo.files_at(&repo.parent_of(&first)).is_empty());
+        assert_eq!(changes(&repo.files_at(&repo.parent_of(&first)), &head).len(), 3);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

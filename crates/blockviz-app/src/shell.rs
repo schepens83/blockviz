@@ -404,7 +404,7 @@ impl Viewer {
                         let (sha, short, subject) = (c.sha.clone(), c.short.clone(), c.subject.clone());
                         menu = menu.child(
                             self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(MONO_FONT).text_size(px(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
-                                .on_click(cx.listener(move |v, _, _, cx| v.start_compare(sha.clone(), "Since a commit".into(), short.clone(), subject.clone(), cx))),
+                                .on_click(cx.listener(move |v, _, _, cx| v.compare_since(sha.clone(), short.clone(), subject.clone(), cx))),
                         );
                     }
                 }
