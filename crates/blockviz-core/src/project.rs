@@ -899,9 +899,31 @@ fn transitive_reduction(b: &mut Builder, container: Id) {
     if uses.len() < 3 {
         return;
     }
+    // Files that use each other (a cycle: models of an app that name one
+    // another) have no reduction: every edge of a cycle is reachable around
+    // it. Each such group of three or more is ordered so that as few of its
+    // edges as possible lead back up (what most others use first), those
+    // few are left out, and the rest, now without cycles, is reduced as
+    // usual. Two files that use each other keep both edges.
+    let scc = components(&uses);
+    let mut groups: Map<usize, Vec<Id>> = Map::default();
+    for (&n, &c) in &scc {
+        groups.entry(c).or_default().push(n);
+    }
+    let mut rank: Map<Id, usize> = Map::default();
+    for members in groups.values().filter(|m| m.len() > 2) {
+        let inside: Set<Id> = members.iter().copied().collect();
+        let sub: Vec<(Id, Id)> = uses.iter().copied().filter(|(a, c)| inside.contains(a) && inside.contains(c)).collect();
+        for (i, n) in feedback_order(members, &sub).into_iter().enumerate() {
+            rank.insert(n, i);
+        }
+    }
+    let back = |a: Id, c: Id| scc[&a] == scc[&c] && rank.get(&a).zip(rank.get(&c)).is_some_and(|(x, y)| x > y);
     let mut adj: Map<Id, Vec<Id>> = Map::default();
     for &(a, c) in &uses {
-        adj.entry(a).or_default().push(c);
+        if !back(a, c) {
+            adj.entry(a).or_default().push(c);
+        }
     }
     let reaches_without = |from: Id, to: Id| -> bool {
         // Is `to` reachable from `from` by a path of length ≥ 2?
@@ -922,11 +944,101 @@ fn transitive_reduction(b: &mut Builder, container: Id) {
         }
         false
     };
-    let redundant: Set<(Id, Id)> = uses.iter().copied().filter(|&(a, c)| reaches_without(a, c)).collect();
+    let redundant: Set<(Id, Id)> = uses.iter().copied().filter(|&(a, c)| back(a, c) || reaches_without(a, c)).collect();
     if redundant.is_empty() {
         return;
     }
     b.get_mut(container).edges.retain(|e| !(e.kind == EdgeKind::Uses && redundant.contains(&(e.from, e.to))));
+}
+
+/// An order of a cycle's nodes with few edges leading back (Eades, Lin and
+/// Smyth's heuristic): nodes nothing inside uses go first, nodes that use
+/// nothing inside last, and otherwise the one used most, net, next.
+fn feedback_order(nodes: &[Id], edges: &[(Id, Id)]) -> Vec<Id> {
+    let mut left: BTreeSet<Id> = nodes.iter().copied().collect();
+    let degree = |n: Id, left: &BTreeSet<Id>, out: bool| edges.iter().filter(|(a, c)| if out { *a == n && left.contains(c) } else { *c == n && left.contains(a) }).count();
+    let (mut head, mut tail) = (vec![], vec![]);
+    while !left.is_empty() {
+        let mut changed = true;
+        while changed {
+            changed = false;
+            if let Some(&n) = left.iter().find(|&&n| degree(n, &left, true) == 0) {
+                tail.push(n);
+                left.remove(&n);
+                changed = true;
+            } else if let Some(&n) = left.iter().find(|&&n| degree(n, &left, false) == 0) {
+                head.push(n);
+                left.remove(&n);
+                changed = true;
+            }
+        }
+        if let Some(&n) = left.iter().max_by_key(|&&n| (degree(n, &left, true) as i64 - degree(n, &left, false) as i64, std::cmp::Reverse(n))) {
+            head.push(n);
+            left.remove(&n);
+        }
+    }
+    tail.reverse();
+    head.extend(tail);
+    head
+}
+
+/// The strongly connected component of each node of a graph (Tarjan's
+/// algorithm, without recursion).
+fn components(edges: &[(Id, Id)]) -> Map<Id, usize> {
+    let mut adj: BTreeMap<Id, Vec<Id>> = BTreeMap::new();
+    for &(a, c) in edges {
+        adj.entry(a).or_default().push(c);
+        adj.entry(c).or_default();
+    }
+    let mut index: Map<Id, usize> = Map::default();
+    let mut low: Map<Id, usize> = Map::default();
+    let mut on_stack: Set<Id> = Set::default();
+    let mut stack: Vec<Id> = vec![];
+    let mut out: Map<Id, usize> = Map::default();
+    let mut next = 0;
+    let mut count = 0;
+    for &root in adj.keys() {
+        if index.contains_key(&root) {
+            continue;
+        }
+        // (node, position in its successors)
+        let mut work: Vec<(Id, usize)> = vec![(root, 0)];
+        while let Some(&mut (v, ref mut i)) = work.last_mut() {
+            if *i == 0 {
+                index.insert(v, next);
+                low.insert(v, next);
+                next += 1;
+                stack.push(v);
+                on_stack.insert(v);
+            }
+            if let Some(&w) = adj[&v].get(*i) {
+                *i += 1;
+                if !index.contains_key(&w) {
+                    work.push((w, 0));
+                } else if on_stack.contains(&w) {
+                    let l = low[&v].min(index[&w]);
+                    low.insert(v, l);
+                }
+                continue;
+            }
+            work.pop();
+            if let Some(&(parent, _)) = work.last() {
+                let l = low[&parent].min(low[&v]);
+                low.insert(parent, l);
+            }
+            if low[&v] == index[&v] {
+                while let Some(w) = stack.pop() {
+                    on_stack.remove(&w);
+                    out.insert(w, count);
+                    if w == v {
+                        break;
+                    }
+                }
+                count += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Maps an import specifier to a repo file, per language convention.
