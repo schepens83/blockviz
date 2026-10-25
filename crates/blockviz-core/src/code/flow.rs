@@ -1189,7 +1189,20 @@ impl<'c, 'p> Fb<'c, 'p> {
         let mut const_names: Set<String> = Set::default();
         // Route tables: `urlpatterns = [path(...), ...]` and later `+=` additions.
         let mut tables: Vec<(String, Vec<Row>, &'p Stmt)> = vec![];
+        // Rails' `routes.draw do … end`: route tables, one per block it draws.
+        let mut drawn: Vec<(String, Vec<Row>, &'p Stmt)> = vec![];
         for s in body {
+            if self.m.lang == Lang::Ruby {
+                let text = &self.src().text;
+                if let Some((items, module)) = crate::ruby::routes::draw_block(s, text) {
+                    for g in crate::ruby::routes::groups(&items, &module, text) {
+                        let rows = g.routes.iter().map(|r| Row { key: r.key(), value: r.value(), note: String::new(), heading: false }).collect();
+                        drawn.push((g.title, rows, g.first));
+                    }
+                    self.handled.insert(u32::from(s.start()));
+                    continue;
+                }
+            }
             if self.route_rows(s, &mut tables, None) {
                 self.handled.insert(u32::from(s.start()));
                 continue;
@@ -1252,6 +1265,15 @@ impl<'c, 'p> Fb<'c, 'p> {
         }
         if !consts.is_empty() {
             self.settings(&consts, Some("Constants".into()), String::new());
+        }
+        for (name, rows, first) in drawn {
+            let id = self.add(Kind::Table, Shape::Box, name);
+            let span = self.src().span(first.range());
+            let n = self.cx.b.get_mut(id);
+            n.category = "endpoint";
+            n.subtitle = naming::count(rows.len(), "route");
+            n.rows = rows;
+            n.span = Some(span);
         }
         for (name, rows, first) in tables {
             let id = self.add(Kind::Table, Shape::Box, name.clone());

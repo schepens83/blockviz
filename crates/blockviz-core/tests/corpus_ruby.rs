@@ -176,3 +176,51 @@ fn thor_is_a_gem_and_its_executable() {
     assert!(find.badges.contains(&"class method".to_string()));
     assert_eq!(within(&s, def(&s, runner, "help"), "find_class_and_command_by_namespace").reference, Some(find.id));
 }
+
+/// The route a table in `routes.rb` lists for a key, as `(key, value)`.
+fn route_row<'a>(s: &'a Scene, routes: &'a Node, key: &str) -> Option<(&'a str, &'a str, &'a str)> {
+    descendants(s, routes).into_iter().filter(|n| n.kind == Kind::Table).find_map(|t| t.rows.iter().find(|r| r.key == key).map(|r| (t.title.as_str(), r.key.as_str(), r.value.as_str())))
+}
+
+#[test]
+fn lobsters_routes_name_their_actions() {
+    let s = repo("lobsters");
+    let routes = file(&s, "config/routes.rb");
+    // Route tables as `bin/rails routes` prints them, one per block of the file.
+    assert_eq!(route_row(&s, routes, "GET /s/:id/(:title)").map(|r| r.2), Some("stories#show"));
+    assert_eq!(route_row(&s, routes, "PATCH /mod/stories/:story_id/undelete"), Some(("namespace :mod", "PATCH /mod/stories/:story_id/undelete", "mod/stories#undelete")));
+    assert_eq!(route_row(&s, routes, "/jobs").map(|r| r.2), Some("MissionControl::Jobs::Engine"));
+    assert_eq!(route_row(&s, routes, "GET /upvoted").map(|r| r.2), Some("→ /upvoted/stories"));
+    assert!(descendants(&s, routes).iter().all(|n| n.kind == Kind::Table), "a route file is its tables");
+    // Actions are named by their routes: REST, nested, member and inferred.
+    let action = |path: &str, class: &str, name: &str| def(&s, def(&s, file(&s, path), class), name).subtitle.clone();
+    let stories = "app/controllers/stories_controller.rb";
+    assert_eq!(action(stories, "StoriesController", "show"), "GET /stories/:id · GET /s/:id/(:title)");
+    assert_eq!(action(stories, "StoriesController", "upvote"), "POST /stories/:story_id/upvote");
+    assert_eq!(action(stories, "StoriesController", "update"), "PATCH, PUT /stories/:id");
+    assert_eq!(action(stories, "StoriesController", "destroy"), "DELETE /stories/:id · PATCH /stories/:story_id/destroy");
+    assert_eq!(action(stories, "StoriesController", "fetch_url_attributes"), "POST /stories/fetch_url_attributes");
+    assert_eq!(action("app/controllers/comments_controller.rb", "CommentsController", "upvote"), "POST /comments/:id/upvote");
+    assert_eq!(action("app/controllers/login_controller.rb", "LoginController", "index"), "GET /login");
+    assert_eq!(action("app/controllers/users_controller.rb", "UsersController", "show"), "GET /~:username");
+    assert!(action("app/controllers/users_controller.rb", "UsersController", "tree").contains("GET /moderators"));
+    assert_eq!(action("app/controllers/mod/stories_controller.rb", "StoriesController", "edit"), "GET /mod/stories/:id/edit");
+    assert_eq!(action("app/controllers/mod/tags_controller.rb", "TagsController", "new"), "GET /mod/tags/new");
+}
+
+#[test]
+fn mission_control_routes_are_the_engines() {
+    let s = repo("mission_control-jobs");
+    let action = |path: &str, class: &str, name: &str| def(&s, def(&s, file(&s, &format!("app/controllers/mission_control/jobs/{path}")), class), name).subtitle.clone();
+    // An engine's routes reach its namespaced controllers; `root` too.
+    assert_eq!(action("queues_controller.rb", "QueuesController", "index"), "GET /applications/:application_id/queues · GET /queues · GET /");
+    // `scope module: :queues` and a singular `resource :pause`.
+    assert_eq!(action("queues/pauses_controller.rb", "PausesController", "create"), "POST /applications/:application_id/queues/:queue_id/pause");
+    assert_eq!(action("queues/pauses_controller.rb", "PausesController", "destroy"), "DELETE /applications/:application_id/queues/:queue_id/pause");
+    // A singular resource is served by the plural controller; `collection do` drops the id.
+    assert_eq!(action("retries_controller.rb", "RetriesController", "create"), "POST /applications/:application_id/jobs/:job_id/retry");
+    assert_eq!(action("bulk_retries_controller.rb", "BulkRetriesController", "create"), "POST /applications/:application_id/jobs/bulk_retries");
+    // `path: ":status/jobs"`.
+    assert_eq!(action("jobs_controller.rb", "JobsController", "index"), "GET /applications/:application_id/:status/jobs · GET /:status/jobs");
+    assert_eq!(action("recurring_tasks_controller.rb", "RecurringTasksController", "update"), "PATCH, PUT /applications/:application_id/recurring_tasks/:id");
+}

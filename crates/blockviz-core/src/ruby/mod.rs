@@ -16,6 +16,7 @@
 mod libc;
 pub mod lower;
 pub mod rails;
+pub mod routes;
 
 use crate::code::source::Source;
 use crate::code::syntax::{Lang, TextRange};

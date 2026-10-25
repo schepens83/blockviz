@@ -6,7 +6,7 @@
 
 use super::flow::string_literal;
 use super::syntax::{self as ast, Expr, Stmt};
-use crate::hash::Map;
+use crate::hash::{Map, Set};
 
 /// A function's role in its framework.
 pub struct Role {
@@ -432,6 +432,22 @@ pub fn routes(modules: &[super::Module], ix: &super::index::Index) -> Routes {
     // (function, nested prefix, nested function) and (function, verb, path, handler).
     let mut nests: Vec<(usize, String, usize)> = vec![];
     let mut regs: Vec<(usize, String, String, usize)> = vec![];
+    // Rails: actions are named by the routes `config/routes.rb` draws to them.
+    let mut rails: Map<usize, Vec<String>> = Map::default();
+    for m in modules.iter().filter(|m| m.lang == ast::Lang::Ruby) {
+        for s in &m.ast {
+            let Some((items, module)) = crate::ruby::routes::draw_block(s, &m.src.text) else { continue };
+            for r in crate::ruby::routes::all(&items, &module) {
+                let Some(class) = r.controller_class() else { continue };
+                let Some(fid) = ruby_method(ix, &class, &r.action) else { continue };
+                let label = r.key();
+                let labels = rails.entry(fid).or_default();
+                if !labels.contains(&label) {
+                    labels.push(label);
+                }
+            }
+        }
+    }
     for (fid, f) in ix.funcs.iter().enumerate() {
         let mi = f.module;
         if modules[mi].lang == ast::Lang::Go {
@@ -538,7 +554,28 @@ pub fn routes(modules: &[super::Module], ix: &super::index::Index) -> Routes {
             }
         }).or_insert(label);
     }
+    for (fid, labels) in rails {
+        handlers.entry(fid).or_insert_with(|| labels.join(" · "));
+    }
     Routes { handlers, prefixes }
+}
+
+/// The method `action` of the Ruby class named `class`, or of one it inherits or mixes in.
+fn ruby_method(ix: &super::index::Index, class: &str, action: &str) -> Option<usize> {
+    use super::index::Ty;
+    let mut stack: Vec<usize> = ix.classes.iter().enumerate().filter(|(_, c)| c.name == class && ix.modules[c.module].lang == ast::Lang::Ruby).map(|(i, _)| i).collect();
+    let mut seen = Set::default();
+    while let Some(c) = stack.pop() {
+        if !seen.insert(c) {
+            continue;
+        }
+        let info = &ix.classes[c];
+        if let Some((_, f)) = info.methods.iter().chain(&info.extra).find(|(n, _)| n == action) {
+            return Some(*f);
+        }
+        stack.extend(info.bases.iter().filter_map(|b| if let Ty::Class(k) = b { Some(*k) } else { None }));
+    }
+    None
 }
 
 /// Go route registrations in a function body: `r.GET("/users/:id", h)`,
