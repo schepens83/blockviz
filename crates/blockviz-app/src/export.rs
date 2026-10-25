@@ -32,7 +32,7 @@ pub fn block_svg(pen: &mut SvgPen, m: &Model, id: u32, theme: &Theme, trace: Opt
     let path = [n.id];
     let xfs = [t];
     let root = n.id == m.root();
-    let p = Paint { width, height, hover: None, selected: None, path: if root { &path } else { &[] }, xfs: if root { &xfs } else { &[] }, related: None, trace, hover_edge: None, diff };
+    let p = Paint { width, height, hover: None, selected: None, path: if root { &path } else { &[] }, xfs: if root { &xfs } else { &[] }, related: None, trace, hover_edge: None, text: 1.0, diff };
     let mut r = Renderer::default();
     // The project itself is drawn as its diagram, as the view of all of it shows it.
     if root {

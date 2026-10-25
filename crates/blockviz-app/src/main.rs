@@ -110,7 +110,7 @@ fn draw_svg(folder: &std::path::Path, out: &str, at: Option<&str>, dark: bool, (
     }
     let theme = if dark { theme::Theme::dark() } else { theme::Theme::light() };
     let xfs = cam.transforms(&m);
-    let p = render::Paint { width: w, height: h, hover: None, selected: None, path: &cam.path, xfs: &xfs, related: None, trace: None, hover_edge: None, diff: None };
+    let p = render::Paint { width: w, height: h, hover: None, selected: None, path: &cam.path, xfs: &xfs, related: None, trace: None, hover_edge: None, text: 1.0, diff: None };
     let mut pen = svgpen::SvgPen::estimating();
     render::Renderer::default().draw(&mut pen, &m, &theme, &p);
     let svg = pen.svg(w, h);

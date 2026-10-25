@@ -186,6 +186,8 @@ pub struct Viewer {
     pub focus: FocusHandle,
     pub settings: Settings,
     pub trunks: bool,
+    /// How large text is drawn, as a factor of its usual size.
+    pub text_size: f64,
     pub cursor: CursorStyle,
     /// The commits the Compare menu offers.
     pub log: Vec<Commit>,
@@ -212,6 +214,7 @@ impl Viewer {
             v.apply_scheme(cx);
         });
         let trunks = settings.trunks;
+        let text_size = settings.text_size;
         let panel_w = settings.panel_w.unwrap_or(PANEL_W);
         let settings_unscoped = settings.unscoped;
         Viewer {
@@ -262,6 +265,7 @@ impl Viewer {
             focus,
             settings,
             trunks,
+            text_size,
             cursor: CursorStyle::OpenHand,
             log: vec![],
             default_branch: None,
@@ -452,6 +456,15 @@ impl Viewer {
                 self.compare_live(spec, title, cx);
             }
         }
+    }
+
+    /// Text drawn larger or smaller, remembered.
+    pub fn set_text_size(&mut self, k: f64, cx: &mut Context<Self>) {
+        self.text_size = k;
+        self.settings.text_size = k;
+        self.settings.save();
+        self.sync_panel(cx);
+        cx.notify();
     }
 
     /// Lays the project out again, each block's values on one branching line (or not).
@@ -1095,6 +1108,7 @@ impl Viewer {
             scoped: self.scoped,
             marked: self.marked,
             ui: self.ui.clone(),
+            text: self.text_size,
         };
         self.inspector.update(cx, |i, cx| i.set(Some(state), cx));
     }
@@ -1440,6 +1454,7 @@ impl Viewer {
             related: related.as_ref(),
             trace: self.trace.as_ref(),
             hover_edge: None,
+            text: self.text_size,
             diff: compare.as_ref().map(|d| &**d as &dyn Changes),
         };
         Renderer::default().draw(&mut pen, &m, &self.theme, &p);
@@ -1546,6 +1561,7 @@ impl Viewer {
             related: related.as_ref(),
             trace: self.trace.as_ref(),
             hover_edge,
+            text: self.text_size,
             diff: compare.as_ref().map(|d| &**d as &dyn Changes),
         };
         let origin = (f64::from(bounds.origin.x), f64::from(bounds.origin.y));

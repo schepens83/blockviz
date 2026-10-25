@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
     /// "light" or "dark" when chosen; following the system otherwise.
@@ -16,6 +16,24 @@ pub struct Settings {
     pub unscoped: bool,
     /// Folders opened, most recent first.
     pub recent: Vec<String>,
+    /// How large text is drawn, as a factor of its usual size (1.0 is usual).
+    pub text_size: f64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { scheme: None, trunks: false, panel_w: None, unscoped: false, recent: vec![], text_size: 1.0 }
+    }
+}
+
+/// The text sizes to step through, as factors.
+const TEXT_STEPS: [f64; 7] = [0.85, 1.0, 1.15, 1.3, 1.5, 1.75, 2.0];
+
+/// The next size up or down from `now`; between steps it goes to the neighbouring one, and it stops at the ends.
+pub fn text_step(now: f64, up: bool) -> f64 {
+    let eps = 1e-9;
+    let next = if up { TEXT_STEPS.iter().copied().find(|&s| s > now + eps) } else { TEXT_STEPS.iter().rev().copied().find(|&s| s < now - eps) };
+    next.unwrap_or(if up { TEXT_STEPS[TEXT_STEPS.len() - 1] } else { TEXT_STEPS[0] })
 }
 
 /// How many folders the Open dialog lists.
@@ -48,5 +66,39 @@ impl Settings {
         self.recent.insert(0, f);
         self.recent.truncate(RECENT);
         self.save();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steps_up_and_down() {
+        assert_eq!(text_step(1.0, true), 1.15);
+        assert_eq!(text_step(1.0, false), 0.85);
+        assert_eq!(text_step(1.5, true), 1.75);
+    }
+
+    #[test]
+    fn stops_at_the_ends() {
+        assert_eq!(text_step(2.0, true), 2.0);
+        assert_eq!(text_step(0.85, false), 0.85);
+        assert_eq!(text_step(5.0, true), 2.0);
+        assert_eq!(text_step(0.1, false), 0.85);
+    }
+
+    #[test]
+    fn off_list_goes_to_the_neighbour() {
+        assert_eq!(text_step(1.1, true), 1.15);
+        assert_eq!(text_step(1.1, false), 1.0);
+    }
+
+    #[test]
+    fn old_files_load_as_usual_size() {
+        let s: Settings = serde_json::from_str(r#"{"trunks":true,"recent":["/a"]}"#).unwrap();
+        assert_eq!(s.text_size, 1.0);
+        assert!(s.trunks);
+        assert_eq!(Settings::default().text_size, 1.0);
     }
 }

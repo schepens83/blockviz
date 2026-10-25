@@ -7,6 +7,7 @@ use crate::crumbs;
 use crate::menus;
 use crate::icons::icon;
 use crate::pen::Pen;
+use crate::settings::text_step;
 use crate::render::drawn_in;
 use crate::theme::{mono_font, Color, Ui, LEGEND, UI_FONT};
 use crate::viewer::{dragged_width, Dialog, Menu, Viewer, PANEL_W};
@@ -53,6 +54,26 @@ pub fn icon_button(id: impl Into<gpui::ElementId>, name: &str, size: f32, side: 
         .when(!enabled, |d| d.opacity(0.45))
         .tooltip(tip(title.to_string(), ui))
         .child(svg().path(icon(name)).size(px(size)).text_color(muted))
+}
+
+/// A square button holding a short text, as `icon_button` holds an icon.
+fn text_button(id: &'static str, label: &'static str, title: &str, ui: &Ui, enabled: bool) -> Stateful<gpui::Div> {
+    let (muted, ink, hover) = (ui.muted, ui.ink, ui.hover);
+    div()
+        .id(id)
+        .size(px(30.0))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(7.0))
+        .text_size(px(13.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(muted)
+        .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover).text_color(ink)))
+        .when(!enabled, |d| d.opacity(0.45))
+        .tooltip(tip(title.to_string(), ui))
+        .child(label)
 }
 
 pub fn kbd(text: &str, ui: &Ui) -> gpui::Div {
@@ -420,6 +441,7 @@ impl Viewer {
     fn zoombar(&self, cx: &mut Context<Self>) -> AnyElement {
         let ui = &self.ui;
         let on = self.trunks;
+        let (smaller, larger) = (text_step(self.text_size, false) < self.text_size, text_step(self.text_size, true) > self.text_size);
         let (hover, ink) = (ui.hover, ui.ink);
         let switch = div()
             .id("trunks")
@@ -467,6 +489,15 @@ impl Viewer {
             .child(icon_button("home", "house", 15.0, 30.0, "Whole project (H)", ui, true).on_click(cx.listener(|v, _, _, cx| v.home(cx))))
             .child(div().w(px(1.0)).h(px(18.0)).bg(ui.line).mx(px(3.0)))
             .child(switch)
+            .child(div().w(px(1.0)).h(px(18.0)).bg(ui.line).mx(px(3.0)))
+            .child(text_button("text-smaller", "A−", "Smaller text", ui, smaller).on_click(cx.listener(|v, _, _, cx| {
+                let k = text_step(v.text_size, false);
+                v.set_text_size(k, cx);
+            })))
+            .child(text_button("text-larger", "A+", "Larger text", ui, larger).on_click(cx.listener(|v, _, _, cx| {
+                let k = text_step(v.text_size, true);
+                v.set_text_size(k, cx);
+            })))
             .into_any_element()
     }
 

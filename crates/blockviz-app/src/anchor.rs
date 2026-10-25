@@ -102,7 +102,7 @@ mod tests {
     /// What a frame of this view draws, as the window would draw it.
     fn hits_of(m: &Model, cam: &Camera, w: f64, h: f64) -> Vec<Hit> {
         let xfs = cam.transforms(m);
-        let p = crate::render::Paint { width: w, height: h, hover: None, selected: None, path: &cam.path, xfs: &xfs, related: None, trace: None, hover_edge: None, diff: None };
+        let p = crate::render::Paint { width: w, height: h, hover: None, selected: None, path: &cam.path, xfs: &xfs, related: None, trace: None, hover_edge: None, text: 1.0, diff: None };
         let mut pen = crate::svgpen::SvgPen::estimating();
         crate::render::Renderer::default().draw(&mut pen, m, &crate::theme::Theme::light(), &p).hits
     }

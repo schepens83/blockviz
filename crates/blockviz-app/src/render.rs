@@ -101,6 +101,8 @@ pub struct Paint<'a> {
     pub trace: Option<&'a Trace>,
     /// The edge under the pointer.
     pub hover_edge: Option<EdgeId>,
+    /// How large text may grow when zoomed in, as a factor of its usual size.
+    pub text: f64,
     /// How the code differs from a base version: what changed is colored, the rest faded.
     pub diff: Option<&'a dyn Changes>,
 }
@@ -606,7 +608,7 @@ impl<'a, 'p> Draw<'a, 'p> {
         }
         if open > 0.01 {
             if let (Some(inner), Some(o)) = (inner, owner) {
-                let hs = (13.0 * t.s).min(19.0);
+                let hs = (13.0 * t.s).min(19.0 * self.p.text);
                 self.seen(me, n, hs, alpha * open * legible * smoothstep(4.2, 7.0, hs));
                 self.header(n, b, t, alpha * open * legible);
                 let shown = if o.rows.is_empty() { alpha * open } else { alpha * open * legible };
@@ -745,7 +747,7 @@ impl<'a, 'p> Draw<'a, 'p> {
         };
         let size_for = |d: &mut Self, at10: &mut dyn FnMut(&mut Self, &str) -> f64, text: &str, share: f64| {
             let fits = room / (at10(d, text) / 10.0).max(1.0);
-            clamp(natural, 11.5f64.min(b.h * share).min(fits.max(natural)), 18.0)
+            clamp(natural, 11.5f64.min(b.h * share).min(fits.max(natural)), 18.0 * d.p.text)
         };
         // A box with room keeps a readable name; so does a landmark (a file, a
         // class, a file on disk) whose name still fits it at a legible size,
@@ -762,7 +764,7 @@ impl<'a, 'p> Draw<'a, 'p> {
             // tall enough for, broken between its words, rather than shrinking.
             let wraps = self.wrapped(&n.title, family, weight);
             for k in 2..=wraps.len() {
-                let s = clamp(natural, 11.5f64.min(b.h * 0.6 / k as f64).min((room / (wraps[k - 1].1 / 10.0)).max(natural)), 18.0);
+                let s = clamp(natural, 11.5f64.min(b.h * 0.6 / k as f64).min((room / (wraps[k - 1].1 / 10.0)).max(natural)), 18.0 * self.p.text);
                 if s > size + 0.5 {
                     lines = wraps[k - 1].0.clone();
                     size = s;
@@ -836,7 +838,7 @@ impl<'a, 'p> Draw<'a, 'p> {
     }
 
     fn header(&mut self, n: &Node, b: Rect, t: Xf, alpha: f64) {
-        let size = (13.0 * t.s).min(19.0);
+        let size = (13.0 * t.s).min(19.0 * self.p.text);
         if size < 4.2 || alpha < 0.02 {
             return;
         }
@@ -993,7 +995,7 @@ impl<'a, 'p> Draw<'a, 'p> {
     fn flow_title(&mut self, n: &Node, b: Rect, t: Xf, alpha: f64, flow: crate::theme::Flow) {
         let band = (FLOW_BAND * t.s).min(b.h);
         // Text grows with the zoom only so far: past that, more of it fits.
-        let size = (12.0 * t.s).min(16.0);
+        let size = (12.0 * t.s).min(16.0 * self.p.text);
         let shown = alpha * smoothstep(4.2, 7.0, size);
         if shown < 0.01 {
             return;
@@ -1171,7 +1173,7 @@ impl<'a, 'p> Draw<'a, 'p> {
         if b.h == 0.0 || n.title.is_empty() {
             return;
         }
-        let size = (11.5 * t.s).min(15.0);
+        let size = (11.5 * t.s).min(15.0 * self.p.text);
         if size < 4.2 {
             return;
         }
@@ -1201,7 +1203,7 @@ impl<'a, 'p> Draw<'a, 'p> {
         ctx.move_to(x - half, b.y);
         ctx.line_to(x + half, b.y);
         ctx.stroke();
-        let size = (10.5 * t.s).min(13.0);
+        let size = (10.5 * t.s).min(13.0 * self.p.text);
         if size >= 4.2 {
             self.ctx.set_alpha(alpha * smoothstep(4.2, 7.0, size));
             self.font(size, Family::Sans, 400);
@@ -1216,7 +1218,7 @@ impl<'a, 'p> Draw<'a, 'p> {
     fn rows(&mut self, owner: &Node, t: Xf, alpha: f64) {
         // Rows read at most at the size names do, however far the table is
         // zoomed or however few rows give it a large scale beside its neighbors.
-        let size = (11.5 * t.s).min(ROW_MAX);
+        let size = (11.5 * t.s).min(ROW_MAX * self.p.text);
         if size < 3.0 {
             return;
         }
@@ -1369,7 +1371,7 @@ impl<'a, 'p> Draw<'a, 'p> {
             return;
         }
         let lit = state == Some(true);
-        let size = (11.0 * t.s).min(13.5);
+        let size = (11.0 * t.s).min(13.5 * self.p.text);
         self.font(size, Family::Mono, 400);
         // Labels never overprint each other; the one for a highlighted edge wins.
         let r = Rect { x: x - 1.0, y: y - size, w: self.width(&e.label) + 2.0, h: size + 2.0 };
@@ -1447,7 +1449,7 @@ impl<'a, 'p> Draw<'a, 'p> {
         ctx.close_path();
         ctx.fill();
         if !r.label.is_empty() && t.s * 11.0 >= 4.5 {
-            let size = (11.0 * t.s).min(13.5);
+            let size = (11.0 * t.s).min(13.5 * self.p.text);
             self.font(size, Family::Mono, 400);
             let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
             self.ctx.set_line_width(3.0);
@@ -1702,7 +1704,7 @@ mod tests {
         cam.fit_root(&m, 1000.0, 700.0);
         let xfs = cam.transforms(&m);
         let theme = Theme::light();
-        let p = Paint { width: 1000.0, height: 700.0, hover: None, selected: None, path: &cam.path, xfs: &xfs, related: None, trace: None, hover_edge: None, diff: None };
+        let p = Paint { width: 1000.0, height: 700.0, hover: None, selected: None, path: &cam.path, xfs: &xfs, related: None, trace: None, hover_edge: None, text: 1.0, diff: None };
         let mut pen = crate::svgpen::SvgPen::estimating();
         let drew = Renderer::default().draw(&mut pen, &m, &theme, &p);
         let svg = pen.svg(1000.0, 700.0);

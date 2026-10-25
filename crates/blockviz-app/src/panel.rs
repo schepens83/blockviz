@@ -89,6 +89,8 @@ pub struct PanelState {
     pub scoped: bool,
     pub marked: Option<usize>,
     pub ui: Ui,
+    /// How large text is, as a factor of its usual size.
+    pub text: f64,
 }
 
 /// The most lines of source shown.
@@ -115,6 +117,8 @@ struct UseRow {
 pub struct Inspector {
     viewer: WeakEntity<Viewer>,
     ui: Ui,
+    /// How large text is, as a factor of its usual size.
+    text: f32,
     state: Option<PanelState>,
     all_uses: bool,
     scroll: ScrollHandle,
@@ -128,7 +132,7 @@ pub struct Inspector {
 
 impl Inspector {
     pub fn new(viewer: WeakEntity<Viewer>, ui: Ui) -> Self {
-        Inspector { viewer, ui, state: None, all_uses: false, scroll: ScrollHandle::new(), runs: HashMap::new(), revealed: None, unfolded: HashSet::new() }
+        Inspector { viewer, ui, text: 1.0, state: None, all_uses: false, scroll: ScrollHandle::new(), runs: HashMap::new(), revealed: None, unfolded: HashSet::new() }
     }
 
     pub fn set(&mut self, state: Option<PanelState>, cx: &mut Context<Self>) {
@@ -148,6 +152,7 @@ impl Inspector {
                 self.runs.clear();
             }
             self.ui = s.ui.clone();
+            self.text = s.text as f32;
         }
         self.state = state;
         cx.notify();
@@ -190,6 +195,16 @@ impl Inspector {
         });
     }
 
+    /// A text size or line height of `n` pixels, at the text size chosen.
+    fn t(&self, n: f32) -> gpui::Pixels {
+        px(n * self.text)
+    }
+
+    /// The width of a character of code at the text size chosen.
+    fn ch(&self) -> f32 {
+        CH * self.text
+    }
+
     // ----- pieces -----------------------------------------------------------------------
 
     fn head(&self, kind: String, sub: Option<String>, title: String, mono: bool, cx: &mut Context<Self>, close: impl Fn(&mut Viewer, &mut Context<Viewer>) + Copy + 'static) -> AnyElement {
@@ -203,20 +218,20 @@ impl Inspector {
                     .mt(px(-4.0))
                     .mr(px(-6.0))
                     .mb(px(2.0))
-                    .child(div().flex().text_size(px(11.0)).text_color(ui.faint).font_weight(FontWeight::SEMIBOLD).child(kind.to_uppercase()).when_some(sub, |d, s| d.child(div().font_weight(FontWeight::MEDIUM).child(format!(" · {s}")))))
+                    .child(div().flex().text_size(self.t(11.0)).text_color(ui.faint).font_weight(FontWeight::SEMIBOLD).child(kind.to_uppercase()).when_some(sub, |d, s| d.child(div().font_weight(FontWeight::MEDIUM).child(format!(" · {s}")))))
                     .child(icon_button("close", "x", 15.0, 30.0, "Close details", ui, true).debug_selector(|| "panel-close".into()).on_click(cx.listener(move |this, _, _, cx| this.act(cx, close)))),
             )
-            .child(div().mt(px(2.0)).mb(px(6.0)).font_weight(FontWeight(650.0)).text_size(px(if mono { 14.5 } else { 18.0 })).when(mono, |d| d.font_family(mono_font())).child(title))
+            .child(div().mt(px(2.0)).mb(px(6.0)).font_weight(FontWeight(650.0)).text_size(self.t(if mono { 14.5 } else { 18.0 })).when(mono, |d| d.font_family(mono_font())).child(title))
             .into_any_element()
     }
 
     fn doc(&self, text: impl Into<SharedString>) -> AnyElement {
-        div().mb(px(10.0)).text_color(self.ui.muted).line_height(px(19.5)).child(text.into()).into_any_element()
+        div().mb(px(10.0)).text_color(self.ui.muted).line_height(self.t(19.5)).child(text.into()).into_any_element()
     }
 
     fn label(&self, text: impl Into<SharedString>, count: Option<usize>) -> gpui::Div {
         let ui = &self.ui;
-        div().flex().gap(px(4.0)).text_size(px(11.0)).text_color(ui.faint).font_weight(FontWeight::SEMIBOLD).mb(px(5.0)).child(text.into()).when_some(count, |d, n| d.child(div().font_weight(FontWeight::MEDIUM).child(n.to_string())))
+        div().flex().gap(px(4.0)).text_size(self.t(11.0)).text_color(ui.faint).font_weight(FontWeight::SEMIBOLD).mb(px(5.0)).child(text.into()).when_some(count, |d, n| d.child(div().font_weight(FontWeight::MEDIUM).child(n.to_string())))
     }
 
     fn action(&self, id: &'static str, icon: &str, text: impl Into<SharedString>, dim: Option<String>) -> Stateful<gpui::Div> {
@@ -246,7 +261,7 @@ impl Inspector {
             return None;
         }
         let ui = &self.ui;
-        let chips = values.iter().map(|v| div().px(px(7.0)).py(px(2.0)).rounded(px(5.0)).bg(ui.chip).text_color(ui.chip_ink).text_size(px(if mono { 11.5 } else { 12.0 })).when(mono, |d| d.font_family(mono_font())).child(v.clone()));
+        let chips = values.iter().map(|v| div().px(px(7.0)).py(px(2.0)).rounded(px(5.0)).bg(ui.chip).text_color(ui.chip_ink).text_size(self.t(if mono { 11.5 } else { 12.0 })).when(mono, |d| d.font_family(mono_font())).child(v.clone()));
         Some(div().my(px(10.0)).child(self.label(label.to_uppercase(), None)).child(div().flex().flex_wrap().gap(px(5.0)).children(chips)).into_any_element())
     }
 
@@ -274,7 +289,7 @@ impl Inspector {
                 }))
                 .on_click(cx.listener(move |this, _, _, cx| this.act(cx, move |v, cx| go(v, id, cx))))
                 .child(div().flex().min_w_0().truncate().font_weight(FontWeight(550.0)).child(r.name).when_some(r.dim, |d, t| d.child(div().font_weight(FontWeight::NORMAL).text_color(ui.faint).child(t))))
-                .when_some(r.at, |d, at| d.child(div().flex_none().font_family(mono_font()).text_size(px(11.0)).text_color(ui.faint).child(at)))
+                .when_some(r.at, |d, at| d.child(div().flex_none().font_family(mono_font()).text_size(self.t(11.0)).text_color(ui.faint).child(at)))
         });
         div().flex().flex_col().border_1().border_color(ui.line).rounded(px(8.0)).overflow_hidden().children(list).into_any_element()
     }
@@ -296,7 +311,7 @@ impl Inspector {
                 .gap(px(2.0))
                 .mb(px(8.0))
                 .text_color(ui.faint)
-                .text_size(px(12.0))
+                .text_size(self.t(12.0))
                 .child(said.mr(px(4.0)))
                 .child(icon_button("prev-change", "chevron-left", 15.0, 26.0, "Previous change (P)", ui, true).on_click(cx.listener(|this, _, _, cx| this.act(cx, |v, cx| v.step_change(-1, cx)))))
                 .child(icon_button("next-change", "chevron-right", 15.0, 26.0, "Next change (N)", ui, true).on_click(cx.listener(|this, _, _, cx| this.act(cx, |v, cx| v.step_change(1, cx)))))
@@ -311,12 +326,12 @@ impl Inspector {
             Status::Changed => (ui.changed_bg, ui.changed, "Changed"),
             Status::Removed => (ui.removed_bg, ui.removed, "Removed"),
         };
-        div().px(px(7.0)).py(px(1.0)).rounded(px(10.0)).text_size(px(11.0)).font_weight(FontWeight(650.0)).bg(bg).text_color(ink).child(text).into_any_element()
+        div().px(px(7.0)).py(px(1.0)).rounded(px(10.0)).text_size(self.t(11.0)).font_weight(FontWeight(650.0)).bg(bg).text_color(ink).child(text).into_any_element()
     }
 
     fn source_label(&self, file: &str, rest: String) -> AnyElement {
         let ui = &self.ui;
-        div().mt(px(14.0)).mb(px(5.0)).flex().flex_wrap().font_family(mono_font()).text_size(px(11.0)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).child(file.to_string()).child(div().text_color(ui.faint).child(rest)).into_any_element()
+        div().mt(px(14.0)).mb(px(5.0)).flex().flex_wrap().font_family(mono_font()).text_size(self.t(11.0)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).child(file.to_string()).child(div().text_color(ui.faint).child(rest)).into_any_element()
     }
 
     // ----- source -----------------------------------------------------------------------
@@ -329,8 +344,8 @@ impl Inspector {
             .border_x_1()
             .border_color(ui.line)
             .font_family(mono_font())
-            .text_size(px(11.5))
-            .line_height(px(18.4))
+            .text_size(self.t(11.5))
+            .line_height(self.t(18.4))
             .text_color(ui.code_ink)
             .when(first, |d| d.border_t_1().rounded_t(px(8.0)).pt(px(8.0)))
             .when(last, |d| d.border_b_1().rounded_b(px(8.0)).pb(px(8.0)))
@@ -383,16 +398,16 @@ impl Inspector {
             .when_some(bg, |d, c| d.bg(c))
             .when(tinted && !marked, |d| d.bg(ui.code_hover))
             .when(marked, |d| d.bg(ui.code_marked).debug_selector(|| "marked-line".into()))
-            .child(div().flex_none().w(px(digits as f32 * CH + 18.0)).pl(px(8.0)).pr(px(10.0)).flex().justify_end().text_color(no_color).child(line.no.to_string()));
+            .child(div().flex_none().w(px(digits as f32 * self.ch() + 18.0 * self.text)).pl(px(8.0)).pr(px(10.0)).flex().justify_end().text_color(no_color).child(line.no.to_string()));
         if let Some(kind) = sign {
             let s = match kind {
                 OpKind::Same => " ",
                 OpKind::Add => "+",
                 OpKind::Del => "−",
             };
-            row = row.child(div().flex_none().w(px(1.6 * CH)).text_color(no_color).child(s));
+            row = row.child(div().flex_none().w(px(1.6 * self.ch())).text_color(no_color).child(s));
         }
-        row = row.child(div().flex_none().w(px(indent as f32 * CH))).child(div().flex_1().min_w_0().when(sign == Some(OpKind::Del), |d| d.opacity(0.85)).child(StyledText::new(text).with_runs(runs)));
+        row = row.child(div().flex_none().w(px(indent as f32 * self.ch()))).child(div().flex_1().min_w_0().when(sign == Some(OpKind::Del), |d| d.opacity(0.85)).child(StyledText::new(text).with_runs(runs)));
         if let Some((root, no)) = click {
             row = row
                 .cursor_pointer()
@@ -494,15 +509,15 @@ impl Inspector {
                         .bg(ui.code_gap)
                         .text_color(faint)
                         .font_family(UI_FONT)
-                        .text_size(px(11.0))
+                        .text_size(self.t(11.0))
                         .cursor_pointer()
                         .hover(move |s| s.text_color(accent))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.unfolded.insert(key);
                             cx.notify();
                         }))
-                        .child(div().flex_none().w(px(digits as f32 * CH + 18.0)).pl(px(8.0)).pr(px(10.0)).flex().justify_end().child("⋯"))
-                        .child(div().flex_none().w(px(1.6 * CH)))
+                        .child(div().flex_none().w(px(digits as f32 * self.ch() + 18.0 * self.text)).pl(px(8.0)).pr(px(10.0)).flex().justify_end().child("⋯"))
+                        .child(div().flex_none().w(px(1.6 * self.ch())))
                         .child(format!("{} unchanged lines", g.count))
                         .into_any_element()
                 }
@@ -604,7 +619,7 @@ impl Inspector {
                     div()
                         .id("all-uses")
                         .mt(px(5.0))
-                        .text_size(px(12.0))
+                        .text_size(self.t(12.0))
                         .text_color(ui.accent)
                         .cursor_pointer()
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -624,16 +639,16 @@ impl Inspector {
         if !node.rows.is_empty() {
             let rows = node.rows.iter().take(80).map(|r| {
                 if r.heading {
-                    div().mt(px(6.0)).mb(px(2.0)).text_size(px(10.5)).font_weight(FontWeight::BOLD).text_color(ui.heading).child(r.key.to_uppercase())
+                    div().mt(px(6.0)).mb(px(2.0)).text_size(self.t(10.5)).font_weight(FontWeight::BOLD).text_color(ui.heading).child(r.key.to_uppercase())
                 } else {
-                    div().py(px(1.5)).flex().flex_wrap().font_family(mono_font()).text_size(px(11.5)).text_color(ui.muted).child(div().text_color(ui.ink).child(r.key.clone())).when(!r.value.is_empty(), |d| d.child(format!(" = {}", r.value)))
+                    div().py(px(1.5)).flex().flex_wrap().font_family(mono_font()).text_size(self.t(11.5)).text_color(ui.muted).child(div().text_color(ui.ink).child(r.key.clone())).when(!r.value.is_empty(), |d| d.child(format!(" = {}", r.value)))
                 }
             });
             body.push(
                 div()
                     .my(px(10.0))
                     .child(self.label(format!("{} ENTRIES", node.rows.len()), None))
-                    .child(div().id("rows").max_h(px(260.0)).overflow_y_scroll().text_size(px(12.0)).border_1().border_color(ui.line).rounded(px(8.0)).px(px(8.0)).py(px(6.0)).children(rows))
+                    .child(div().id("rows").max_h(px(260.0)).overflow_y_scroll().text_size(self.t(12.0)).border_1().border_color(ui.line).rounded(px(8.0)).px(px(8.0)).py(px(6.0)).children(rows))
                     .into_any_element(),
             );
         }
@@ -641,7 +656,7 @@ impl Inspector {
         let view = m.source_view(node).filter(|v| m.file_text(v.span.file).is_some());
         let Some(view) = view else {
             if !node.code.is_empty() {
-                body.push(div().mt(px(14.0)).px(px(12.0)).py(px(10.0)).bg(ui.code_bg).border_1().border_color(ui.line).rounded(px(8.0)).font_family(mono_font()).text_size(px(11.5)).line_height(px(18.4)).child(node.code.clone()).into_any_element());
+                body.push(div().mt(px(14.0)).px(px(12.0)).py(px(10.0)).bg(ui.code_bg).border_1().border_color(ui.line).rounded(px(8.0)).font_family(mono_font()).text_size(self.t(11.5)).line_height(self.t(18.4)).child(node.code.clone()).into_any_element());
             }
             return;
         };
@@ -779,7 +794,7 @@ impl Inspector {
             v.sync_panel(cx);
             cx.notify();
         }));
-        let code = |t: String| div().font_family(mono_font()).text_size(px(11.5)).text_color(ui.muted).bg(ui.chip).px(px(5.0)).py(px(1.0)).rounded(px(4.0)).truncate().child(t);
+        let code = |t: String| div().font_family(mono_font()).text_size(self.t(11.5)).text_color(ui.muted).bg(ui.chip).px(px(5.0)).py(px(1.0)).rounded(px(4.0)).truncate().child(t);
         body.push(
             div()
                 .flex()
@@ -788,7 +803,7 @@ impl Inspector {
                 .gap(px(6.0))
                 .mb(px(8.0))
                 .text_color(ui.faint)
-                .text_size(px(12.0))
+                .text_size(self.t(12.0))
                 .child(code(c.label.clone()))
                 .child("←")
                 .child(code(c.head_label.clone()))
@@ -813,7 +828,7 @@ impl Inspector {
                 .gap(px(12.0))
                 .mb(px(10.0))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_size(px(12.5))
+                .text_size(self.t(12.5))
                 .child(div().text_color(ui.added).child(format!("{} added", sm[0])))
                 .child(div().text_color(ui.changed).child(format!("{} changed", sm[1])))
                 .child(div().text_color(ui.removed).child(format!("{} removed", sm[2])))
@@ -830,7 +845,7 @@ impl Inspector {
                     .justify_between()
                     .gap(px(10.0))
                     .mb(px(8.0))
-                    .text_size(px(12.0))
+                    .text_size(self.t(12.0))
                     .text_color(ui.muted)
                     .child(div().flex().min_w_0().truncate().child(if on { "In ".to_string() } else { "Everywhere".to_string() }).when(on, |d| d.child(div().ml(px(4.0)).text_color(ui.ink).font_weight(FontWeight::SEMIBOLD).truncate().child(name))))
                     .child(
@@ -850,7 +865,7 @@ impl Inspector {
         }
         let elsewhere = d.changes.len() - visible.len();
         if !visible.is_empty() {
-            body.push(div().mb(px(10.0)).flex().flex_wrap().items_center().gap(px(4.0)).text_color(ui.muted).line_height(px(19.5)).child("In the order the diagram reads. Click a change to unfold it, double-click to zoom to it;").child(kbd("N", &ui)).child("and").child(kbd("P", &ui)).child("step through them.").into_any_element());
+            body.push(div().mb(px(10.0)).flex().flex_wrap().items_center().gap(px(4.0)).text_color(ui.muted).line_height(self.t(19.5)).child("In the order the diagram reads. Click a change to unfold it, double-click to zoom to it;").child(kbd("N", &ui)).child("and").child(kbd("P", &ui)).child("step through them.").into_any_element());
         } else if narrowed && elsewhere > 0 {
             body.push(
                 div()
@@ -937,7 +952,7 @@ impl Inspector {
                                     });
                                 }))
                                 .child(div().flex().min_w_0().truncate().font_weight(FontWeight(550.0)).child(name).child(div().font_weight(FontWeight::NORMAL).text_color(ui.faint).child(format!(" · {}", info.kind.to_lowercase()))))
-                                .when_some(info.line, |d, l| d.child(div().flex_none().font_family(mono_font()).text_size(px(11.0)).text_color(ui.faint).child(l.to_string()))),
+                                .when_some(info.line, |d, l| d.child(div().flex_none().font_family(mono_font()).text_size(self.t(11.0)).text_color(ui.faint).child(l.to_string()))),
                         )
                         .child(
                             icon_button(("zoom-to", i), "crosshair", 13.0, 26.0, "Zoom to it", &ui, true)
@@ -963,7 +978,7 @@ impl Inspector {
             body.push(
                 div()
                     .my(px(10.0))
-                    .child(div().flex().items_center().gap(px(6.0)).mb(px(5.0)).font_family(mono_font()).text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).when_some(*mark, |dv, m| dv.child(self.file_mark_el(m))).child(if file.is_empty() { "Repository".to_string() } else { file.clone() }))
+                    .child(div().flex().items_center().gap(px(6.0)).mb(px(5.0)).font_family(mono_font()).text_size(self.t(11.5)).font_weight(FontWeight::MEDIUM).text_color(ui.muted).when_some(*mark, |dv, m| dv.child(self.file_mark_el(m))).child(if file.is_empty() { "Repository".to_string() } else { file.clone() }))
                     .child(div().flex().flex_col().border_1().border_color(ui.line).rounded(px(8.0)).overflow_hidden().children(rows))
                     .into_any_element(),
             );
@@ -974,7 +989,7 @@ impl Inspector {
         let others: Vec<crate::compare::FileChange> = if narrowed { crate::scope::files_in(&m, &rest, s.scope).into_iter().cloned().collect() } else { rest };
         if !others.is_empty() {
             let rows = others.iter().map(|f| div().flex().items_center().truncate().child(self.file_mark_el(file_mark(f.status))).child(format!("{}{}", f.previous.as_ref().map(|p| format!("{p} → ")).unwrap_or_default(), f.path)));
-            body.push(div().my(px(10.0)).child(self.label("ALSO CHANGED", Some(others.len()))).child(div().flex().flex_col().gap(px(3.0)).font_family(mono_font()).text_size(px(11.5)).text_color(ui.muted).children(rows)).into_any_element());
+            body.push(div().my(px(10.0)).child(self.label("ALSO CHANGED", Some(others.len()))).child(div().flex().flex_col().gap(px(3.0)).font_family(mono_font()).text_size(self.t(11.5)).text_color(ui.muted).children(rows)).into_any_element());
         }
     }
 
@@ -1005,7 +1020,7 @@ impl Inspector {
             'D' => ui.removed,
             _ => ui.renamed,
         };
-        div().flex().flex_none().items_center().justify_center().size(px(15.0)).rounded(px(3.0)).bg(bg).text_color(ui.on_strong).font_family(UI_FONT).font_weight(FontWeight::BOLD).text_size(px(10.0)).mr(px(6.0)).child(m.to_string()).into_any_element()
+        div().flex().flex_none().items_center().justify_center().size(px(15.0)).rounded(px(3.0)).bg(bg).text_color(ui.on_strong).font_family(UI_FONT).font_weight(FontWeight::BOLD).text_size(self.t(10.0)).mr(px(6.0)).child(m.to_string()).into_any_element()
     }
 }
 
@@ -1021,7 +1036,7 @@ fn file_mark(s: crate::compare::FileStatus) -> char {
 impl Render for Inspector {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let ui = self.ui.clone();
-        let panel = div().size_full().flex().flex_col().bg(ui.panel).border_1().border_color(ui.line).rounded(px(12.0)).shadow(ui.shadow()).font_family(UI_FONT).text_size(px(13.0)).text_color(ui.ink).occlude();
+        let panel = div().size_full().flex().flex_col().bg(ui.panel).border_1().border_color(ui.line).rounded(px(12.0)).shadow(ui.shadow()).font_family(UI_FONT).text_size(self.t(13.0)).text_color(ui.ink).occlude();
         let Some(s) = self.state.take() else { return panel };
         let mut body: Vec<AnyElement> = vec![];
         let mut reveal = None;
