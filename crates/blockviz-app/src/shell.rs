@@ -375,11 +375,12 @@ impl Viewer {
 
     fn menu_item(&self, id: impl Into<gpui::ElementId>, label: impl IntoElement) -> Stateful<gpui::Div> {
         let hover = self.ui.hover;
-        div().id(id.into()).w_full().px(px(10.0)).py(px(7.0)).rounded(px(7.0)).font_weight(FontWeight::SEMIBOLD).cursor_pointer().hover(move |s| s.bg(hover)).child(label)
+        div().id(id.into()).min_w_0().px(px(10.0)).py(px(7.0)).rounded(px(7.0)).font_weight(FontWeight::SEMIBOLD).cursor_pointer().hover(move |s| s.bg(hover)).child(label)
     }
 
     fn menu_frame(&self, min_w: f32) -> gpui::Div {
         let ui = &self.ui;
+        let min_w = (self.width - 24.0).min(f32::from(ui.t(min_w)) as f64) as f32;
         div()
             .absolute()
             .top(px(56.0))
@@ -408,7 +409,7 @@ impl Viewer {
             ),
             Menu::Compare => {
                 let line = |title: String, detail: String| div().flex().flex_col().child(title).child(div().text_size(ui.t(11.5)).font_weight(FontWeight::NORMAL).text_color(ui.faint).child(detail));
-                let mut menu = self.menu_frame(320.0).max_w(px(420.0)).child(
+                let mut menu = self.menu_frame(320.0).max_w(px((self.width - 24.0).min(f32::from(ui.t(420.0)) as f64) as f32)).debug_selector(|| "compare-menu".into()).child(
                     self.menu_item("uncommitted", line("Uncommitted changes".into(), "The folder as it is, against the last commit (HEAD)".into()))
                         .on_click(cx.listener(|v, _, _, cx| v.start_compare("HEAD".into(), "Uncommitted changes".into(), "HEAD".into(), "Working tree vs HEAD".into(), cx))),
                 );
@@ -424,7 +425,7 @@ impl Viewer {
                     for (i, c) in self.log.iter().enumerate() {
                         let (sha, subject) = (c.sha.clone(), c.subject.clone());
                         menu = menu.child(
-                            self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(mono_font()).text_size(ui.t(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
+                            self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(mono_font()).text_size(ui.t(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).debug_selector(|| "commit-subject".into()).child(c.subject.clone())))
                                 .on_click(cx.listener(move |v, _, _, cx| v.compare_commit(sha.clone(), subject.clone(), cx))),
                         );
                     }

@@ -622,3 +622,20 @@ fn a_long_panel_has_a_scrollbar_whose_thumb_drags_the_text(cx: &mut TestAppConte
     release(cx, point(x, body.bottom() - px(4.0)), 1);
     assert!(-f32::from(bar.handle.offset().y) > max * 0.9);
 }
+
+#[gpui::test]
+fn a_long_commit_subject_is_cut_short_inside_the_compare_menu(cx: &mut TestAppContext) {
+    let (view, cx) = open(cx);
+    view.update(cx, |v, cx| {
+        v.set_text_size(1.6, cx);
+        let subject = "School: a Magister client that rotates the refresh token and keeps it encrypted at rest".to_string();
+        v.log = vec![crate::git::Commit { sha: "bad409e0".into(), short: "bad409e".into(), subject, author: "A".into(), when: 0 }];
+        v.menu = Some(Menu::Compare);
+        cx.notify();
+    });
+    frame(cx);
+    let menu = cx.debug_bounds("compare-menu").expect("the menu is open");
+    let subject = cx.debug_bounds("commit-subject").expect("the commit is listed");
+    eprintln!("ROW {:?}", cx.debug_bounds("commit-row"));
+    assert!(subject.right() <= menu.right(), "{menu:?} {subject:?} the subject ends at {:?}, past the menu's edge at {:?}", subject.right(), menu.right());
+}
