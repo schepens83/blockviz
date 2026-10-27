@@ -3,7 +3,7 @@
 //! hairline outlines, gray regions for repeated or conditional structure, and
 //! monochrome arrows. On a dark page the same, its lightness turned over.
 
-use gpui::Hsla;
+use gpui::{px, Hsla, Pixels};
 
 /// A color as the web app writes them: 8-bit channels and an opacity.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -326,6 +326,8 @@ pub const LEGEND: [(&str, &str); 14] = [
 #[derive(Clone, Debug)]
 pub struct Ui {
     pub dark: bool,
+    /// How much larger or smaller than usual text is set (1.0 is usual).
+    pub text: f32,
     pub bg: Hsla,
     pub glass: Hsla,
     pub ink: Hsla,
@@ -366,11 +368,23 @@ pub struct Ui {
 }
 
 impl Ui {
+    /// A text size or line height of `n` pixels, at the text size chosen.
+    pub fn t(&self, n: f32) -> Pixels {
+        px(n * self.text)
+    }
+
+    /// These colors, with text at `k` times its usual size.
+    pub fn scaled(mut self, k: f64) -> Self {
+        self.text = k as f32;
+        self
+    }
+
     pub fn new(dark: bool) -> Self {
         let p = |light: u32, night: u32| Color::hex(if dark { night } else { light }).hsla();
         let a = |light: Color, night: Color| (if dark { night } else { light }).hsla();
         Ui {
             dark,
+            text: 1.0,
             bg: p(0xffffff, 0x16181c),
             glass: a(Color::rgba(255, 255, 255, 0.92), Color::rgba(22, 24, 28, 0.9)),
             ink: p(0x17191d, 0xe6e8eb),
@@ -504,6 +518,13 @@ mod tests {
     fn mono_font_skips_a_fontconfig_answer_that_is_not_installed() {
         let installed = names(&["DejaVu Sans Mono", "Liberation Mono"]);
         assert_eq!(pick_mono_font(&installed, Some("Ghost".into())), "DejaVu Sans Mono");
+    }
+
+    #[test]
+    fn text_sizes_follow_the_factor() {
+        let ui = Ui::new(false);
+        assert_eq!(ui.t(12.0), px(12.0));
+        assert_eq!(ui.scaled(1.5).t(12.0), px(18.0));
     }
 
     #[test]

@@ -25,7 +25,7 @@ struct Tip(SharedString, Ui);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let ui = &self.1;
-        div().px(px(8.0)).py(px(4.0)).rounded(px(6.0)).bg(ui.panel).border_1().border_color(ui.line).shadow(ui.shadow()).text_size(px(12.0)).text_color(ui.ink).font_family(UI_FONT).child(self.0.clone())
+        div().px(px(8.0)).py(px(4.0)).rounded(px(6.0)).bg(ui.panel).border_1().border_color(ui.line).shadow(ui.shadow()).text_size(ui.t(12.0)).text_color(ui.ink).font_family(UI_FONT).child(self.0.clone())
     }
 }
 
@@ -67,7 +67,7 @@ fn text_button(id: &'static str, label: &'static str, title: &str, ui: &Ui, enab
         .items_center()
         .justify_center()
         .rounded(px(7.0))
-        .text_size(px(13.0))
+        .text_size(ui.t(13.0))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(muted)
         .when(enabled, |d| d.cursor_pointer().hover(move |s| s.bg(hover).text_color(ink)))
@@ -77,7 +77,7 @@ fn text_button(id: &'static str, label: &'static str, title: &str, ui: &Ui, enab
 }
 
 pub fn kbd(text: &str, ui: &Ui) -> gpui::Div {
-    div().font_family(mono_font()).text_size(px(11.0)).text_color(ui.faint).border_1().border_color(ui.line).rounded(px(4.0)).px(px(5.0)).py(px(1.0)).bg(ui.code_bg).child(text.to_string())
+    div().font_family(mono_font()).text_size(ui.t(11.0)).text_color(ui.faint).border_1().border_color(ui.line).rounded(px(4.0)).px(px(5.0)).py(px(1.0)).bg(ui.code_bg).child(text.to_string())
 }
 
 /// A small drawing made with the diagram's own pen (the legend's samples).
@@ -133,7 +133,7 @@ impl Viewer {
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
             .font_weight(FontWeight(650.0))
-            .text_size(px(14.0))
+            .text_size(ui.t(14.0))
             .tooltip(tip("Whole project (H)", ui))
             .on_click(cx.listener(|v, _, _, cx| v.home(cx)))
             .child(div().flex().flex_col().gap(px(2.0)).child(div().flex().gap(px(2.0)).child(cell(ui.logo[0], 7.0)).child(cell(ui.logo[1], 7.0))).child(cell(ui.logo[2], 16.0)))
@@ -157,7 +157,7 @@ impl Viewer {
             if titled.len() <= 1 {
                 where_ = where_.child(div().flex_none().font_weight(FontWeight::SEMIBOLD).px(px(7.0)).py(px(4.0)).bg(ui.glass).rounded(px(6.0)).whitespace_nowrap().child(m.scene.title.clone()));
                 if self.crumbs.len() <= 1 && self.compare.is_none() && !m.scene.description.is_empty() {
-                    where_ = where_.child(div().min_w_0().max_w(px(520.0)).truncate().text_size(px(12.0)).text_color(ui.faint).bg(ui.glass).px(px(6.0)).py(px(4.0)).rounded(px(6.0)).child(m.scene.description.clone()));
+                    where_ = where_.child(div().min_w_0().max_w(px(520.0)).truncate().text_size(ui.t(12.0)).text_color(ui.faint).bg(ui.glass).px(px(6.0)).py(px(4.0)).rounded(px(6.0)).child(m.scene.description.clone()));
                 }
             } else {
                 where_ = where_.child(self.breadcrumbs(&titled, cx));
@@ -193,7 +193,7 @@ impl Viewer {
                                 .gap(px(5.0))
                                 .font_family(mono_font())
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_size(px(11.5))
+                                .text_size(ui.t(11.5))
                                 .whitespace_nowrap()
                                 .child(div().text_color(ui.added).child(format!("+{}", s.added)))
                                 .child(div().text_color(ui.changed).child(format!("~{}", s.changed)))
@@ -306,7 +306,7 @@ impl Viewer {
                 .rounded(px(8.0))
                 .bg(ui.accent_bg)
                 .text_color(ui.muted)
-                .text_size(px(12.0))
+                .text_size(ui.t(12.0))
                 .shadow(ui.shadow())
                 .cursor_pointer()
                 .hover(move |s| s.bg(hover))
@@ -407,7 +407,7 @@ impl Viewer {
                     .into_any_element(),
             ),
             Menu::Compare => {
-                let line = |title: String, detail: String| div().flex().flex_col().child(title).child(div().text_size(px(11.5)).font_weight(FontWeight::NORMAL).text_color(ui.faint).child(detail));
+                let line = |title: String, detail: String| div().flex().flex_col().child(title).child(div().text_size(ui.t(11.5)).font_weight(FontWeight::NORMAL).text_color(ui.faint).child(detail));
                 let mut menu = self.menu_frame(320.0).max_w(px(420.0)).child(
                     self.menu_item("uncommitted", line("Uncommitted changes".into(), "The folder as it is, against the last commit (HEAD)".into()))
                         .on_click(cx.listener(|v, _, _, cx| v.start_compare("HEAD".into(), "Uncommitted changes".into(), "HEAD".into(), "Working tree vs HEAD".into(), cx))),
@@ -420,11 +420,11 @@ impl Viewer {
                     }
                 }
                 if !self.log.is_empty() {
-                    menu = menu.child(div().px(px(10.0)).pt(px(8.0)).pb(px(4.0)).text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(ui.faint).child("A COMMIT"));
+                    menu = menu.child(div().px(px(10.0)).pt(px(8.0)).pb(px(4.0)).text_size(ui.t(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(ui.faint).child("A COMMIT"));
                     for (i, c) in self.log.iter().enumerate() {
                         let (sha, subject) = (c.sha.clone(), c.subject.clone());
                         menu = menu.child(
-                            self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(mono_font()).text_size(px(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
+                            self.menu_item(("commit", i), div().flex().gap(px(8.0)).min_w_0().child(div().flex_none().font_family(mono_font()).text_size(ui.t(11.5)).text_color(ui.accent).child(c.short.clone())).child(div().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(c.subject.clone())))
                                 .on_click(cx.listener(move |v, _, _, cx| v.compare_commit(sha.clone(), subject.clone(), cx))),
                         );
                     }
@@ -549,7 +549,7 @@ impl Viewer {
             .items_center()
             .gap(px(12.0))
             .text_color(ui.faint)
-            .text_size(px(11.5))
+            .text_size(ui.t(11.5))
             .child(toggle)
             .when_some(stats, |d, s| d.child(s))
             .into_any_element()
@@ -563,7 +563,7 @@ impl Viewer {
         let ui = &self.ui;
         let theme = self.theme.clone();
         let drawn = drawn_in(m);
-        let item = |swatch: AnyElement, label: &str| div().flex().items_center().gap(px(7.0)).text_color(ui.muted).text_size(px(12.0)).child(swatch).child(label.to_string());
+        let item = |swatch: AnyElement, label: &str| div().flex().items_center().gap(px(7.0)).text_color(ui.muted).text_size(ui.t(12.0)).child(swatch).child(label.to_string());
         let mut grid = div().grid().grid_cols(2).gap_x(px(10.0)).gap_y(px(6.0));
         let mut roles = 0;
         for (cat, label) in LEGEND {
@@ -639,7 +639,7 @@ impl Viewer {
             if !c.diff.removed.is_empty() {
                 g = g.child(item(arrow_sample(theme.removed.ink, 1.6, &[5.0, 4.0]), "removed connection"));
             }
-            let count = div().flex().items_center().justify_center().min_w(px(18.0)).h(px(13.0)).rounded(px(7.0)).bg(ui.changed_strong).text_color(ui.on_strong).text_size(px(9.5)).font_weight(FontWeight::SEMIBOLD).child("3").into_any_element();
+            let count = div().flex().items_center().justify_center().min_w(ui.t(18.0)).h(ui.t(13.0)).rounded(px(7.0)).bg(ui.changed_strong).text_color(ui.on_strong).text_size(ui.t(9.5)).font_weight(FontWeight::SEMIBOLD).child("3").into_any_element();
             g = g.child(item(count, "changes inside"));
             let dashed = div().w(px(18.0)).h(px(12.0)).flex_none().border(px(1.6)).border_dashed().rounded(px(3.0)).bg(ui.bg).border_color(theme.changed.ink.hsla()).into_any_element();
             g = g.child(item(dashed, "leads into changes"));
@@ -676,7 +676,7 @@ impl Viewer {
                 .when(roles > 0, |d| d.child(grid))
                 .when(any_lines, |d| d.child(if roles > 0 { section(lines) } else { lines }))
                 .when_some(changes, |d, g| d.child(section(g)))
-                .child(div().mt(px(10.0)).text_color(ui.faint).text_size(px(11.5)).line_height(px(16.7)).child(format!(
+                .child(div().mt(px(10.0)).text_color(ui.faint).text_size(ui.t(11.5)).line_height(ui.t(16.7)).child(format!(
                     "Bigger blocks contain more. Zoom into any block with a corner mark to see inside.{}",
                     if self.compare.is_some() { " What the change did not touch is faded." } else { "" }
                 )))
@@ -827,7 +827,7 @@ impl Viewer {
                     .hover(move |s| s.bg(hover).border_color(line_strong).text_color(ink))
                     .on_click(cx.listener(move |v, _, _, cx| v.open_folder(path.clone(), cx)))
                     .child(ico("folder", 17.0, ui.muted))
-                    .child(div().flex().flex_col().min_w_0().child(div().text_color(ui.ink).font_weight(FontWeight::SEMIBOLD).text_size(px(12.5)).truncate().child(name)).child(div().text_color(ui.faint).text_size(px(11.5)).mt(px(1.0)).truncate().child(shown))),
+                    .child(div().flex().flex_col().min_w_0().child(div().text_color(ui.ink).font_weight(FontWeight::SEMIBOLD).text_size(ui.t(12.5)).truncate().child(name)).child(div().text_color(ui.faint).text_size(ui.t(11.5)).mt(px(1.0)).truncate().child(shown))),
             );
         }
         self.scrim()
@@ -858,8 +858,8 @@ impl Viewer {
                             .gap(px(12.0))
                             .child(
                                 div()
-                                    .child(div().text_size(px(18.0)).font_weight(FontWeight::BOLD).mb(px(4.0)).child("Open a codebase"))
-                                    .child(div().text_color(ui.muted).mb(px(16.0)).line_height(px(19.0)).child("Code is analyzed on this Mac, in Rust. Nothing is uploaded or executed. The diagram follows the folder as you edit it, and in a git repository Compare shows what a change did.")),
+                                    .child(div().text_size(ui.t(18.0)).font_weight(FontWeight::BOLD).mb(px(4.0)).child("Open a codebase"))
+                                    .child(div().text_color(ui.muted).mb(px(16.0)).line_height(ui.t(19.0)).child("Code is analyzed on this Mac, in Rust. Nothing is uploaded or executed. The diagram follows the folder as you edit it, and in a git repository Compare shows what a change did.")),
                             )
                             .when(can_close, |d| d.child(icon_button("open-close", "x", 16.0, 30.0, "Close", ui, true).on_click(cx.listener(|v, _, window, cx| v.close_dialog(window, cx))))),
                     )
@@ -876,7 +876,7 @@ impl Viewer {
                             .py(px(4.0))
                             .text_color(ui.muted)
                             .child(ico("folder-open", 17.0, ui.muted))
-                            .child(div().flex_1().py(px(8.0)).text_size(px(14.0)).text_color(ui.faint).child("A folder on this Mac, or drop one on the window"))
+                            .child(div().flex_1().py(px(8.0)).text_size(ui.t(14.0)).text_color(ui.faint).child("A folder on this Mac, or drop one on the window"))
                             .child(
                                 div()
                                     .id("choose")
@@ -892,7 +892,7 @@ impl Viewer {
                                     .child("Choose…"),
                             ),
                     )
-                    .when(any, |d| d.child(div().mt(px(16.0)).text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(ui.faint).child("RECENT")).child(recent)),
+                    .when(any, |d| d.child(div().mt(px(16.0)).text_size(ui.t(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(ui.faint).child("RECENT")).child(recent)),
             )
             .into_any_element()
     }
@@ -928,9 +928,9 @@ impl Viewer {
                         .gap(px(8.0))
                         .font_weight(FontWeight(550.0))
                         .child(n.title.clone())
-                        .when(!n.subtitle.is_empty(), |d| d.child(div().font_weight(FontWeight::NORMAL).text_size(px(12.0)).text_color(ui.faint).child(n.subtitle.clone()))),
+                        .when(!n.subtitle.is_empty(), |d| d.child(div().font_weight(FontWeight::NORMAL).text_size(ui.t(12.0)).text_color(ui.faint).child(n.subtitle.clone()))),
                 )
-                .child(div().text_size(px(11.5)).text_color(ui.faint).truncate().child(m.trail(id)))
+                .child(div().text_size(ui.t(11.5)).text_color(ui.faint).truncate().child(m.trail(id)))
         });
         let list = div()
             .id("search-results")
@@ -968,7 +968,7 @@ impl Viewer {
                                 .border_b_1()
                                 .border_color(ui.line)
                                 .text_color(ui.ink)
-                                .text_size(px(15.0))
+                                .text_size(ui.t(15.0))
                                 .child(ico("search", 16.0, ui.faint))
                                 .child(s.input.clone())
                                 .child(kbd("esc", ui)),
@@ -1051,7 +1051,7 @@ impl Render for Viewer {
             .overflow_hidden()
             .bg(ui.bg)
             .font_family(UI_FONT)
-            .text_size(px(13.0))
+            .text_size(ui.t(13.0))
             .text_color(ui.ink)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key))

@@ -208,7 +208,7 @@ impl Viewer {
         let system_dark = matches!(window.appearance(), gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark);
         let dark = scheme.unwrap_or(system_dark);
         let me = cx.entity().downgrade();
-        let ui = Ui::new(dark);
+        let ui = Ui::new(dark).scaled(settings.text_size);
         let inspector = cx.new(|_| Inspector::new(me, ui.clone()));
         let appearance = cx.observe_window_appearance(window, |v, window, cx| {
             v.system_dark = matches!(window.appearance(), gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark);
@@ -286,7 +286,7 @@ impl Viewer {
         let dark = self.dark();
         if self.theme.dark != dark {
             self.theme = if dark { Theme::dark() } else { Theme::light() };
-            self.ui = Ui::new(dark);
+            self.ui = Ui::new(dark).scaled(self.text_size);
             self.sync_panel(cx);
         }
         cx.notify();
@@ -462,6 +462,7 @@ impl Viewer {
     /// Text drawn larger or smaller, remembered.
     pub fn set_text_size(&mut self, k: f64, cx: &mut Context<Self>) {
         self.text_size = k;
+        self.ui.text = k as f32;
         self.settings.text_size = k;
         self.settings.save();
         self.sync_panel(cx);
