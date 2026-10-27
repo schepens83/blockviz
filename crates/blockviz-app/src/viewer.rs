@@ -833,6 +833,9 @@ impl Viewer {
     // ----- selection ------------------------------------------------------------------
 
     pub fn select(&mut self, id: Option<u32>, path: Option<Vec<u32>>, cx: &mut Context<Self>) {
+        // A folder's panel would only repeat what the canvas shows: it selects nothing.
+        let folder = id.is_some_and(|id| self.m.as_ref().is_some_and(|m| m.node(id).kind == blockviz_core::ir::Kind::Dir));
+        let (id, path) = if folder { (None, None) } else { (id, path) };
         self.selected = id;
         self.selected_path = path;
         self.value = None;

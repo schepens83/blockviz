@@ -639,3 +639,20 @@ fn a_long_commit_subject_is_cut_short_inside_the_compare_menu(cx: &mut TestAppCo
     eprintln!("ROW {:?}", cx.debug_bounds("commit-row"));
     assert!(subject.right() <= menu.right(), "{menu:?} {subject:?} the subject ends at {:?}, past the menu's edge at {:?}", subject.right(), menu.right());
 }
+
+#[gpui::test]
+fn selecting_a_folder_opens_no_panel(cx: &mut TestAppContext) {
+    let (view, cx) = open(cx);
+    let f = files(&[("pkg/model.py", MODEL_PY), ("pkg/util.py", "def f():\n    return 1\n"), ("train.py", &TRAIN_PY.replace("from model", "from pkg.model"))]);
+    let m = model(&f);
+    view.update(cx, |v, cx| v.show(PathBuf::from("/tmp/t"), f, m, cx));
+    frame(cx);
+    let dir = view.read_with(cx, |v, _| titled(v, "pkg/"));
+    view.update(cx, |v, cx| {
+        let path = v.m.as_ref().unwrap().canonical_path(dir);
+        v.select(Some(dir), Some(path), cx);
+    });
+    frame(cx);
+    assert!(!view.read_with(cx, |v, _| v.panel_open()));
+    assert_eq!(content(&view, cx), Content::None);
+}
