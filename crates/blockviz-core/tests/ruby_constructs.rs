@@ -211,3 +211,19 @@ fn rake_files_are_ruby_and_their_tasks_functions() {
     assert!(!descendants(&s, tasks).iter().any(|n| n.title == "namespace" || n.title == "db"));
     assert_eq!(def(&s, file(&s, "Rakefile"), "default").subtitle, "rake task");
 }
+
+#[test]
+fn views_stay_views_beside_a_script_among_them() {
+    // Rails 8 puts a PWA's service worker, JavaScript, among the views.
+    let s = analyze(&[
+        ("Gemfile", "gem \"rails\"\n"),
+        ("app/controllers/stories_controller.rb", "class StoriesController < ApplicationController\n  def index\n  end\n\n  def show\n  end\nend\n"),
+        ("app/views/stories/index.html.erb", "<h1>Stories</h1>\n"),
+        ("app/views/stories/show.html.erb", "<h1><%= @story.title %></h1>\n"),
+        ("app/views/layouts/application.html.erb", "<%= yield %>\n"),
+        ("app/views/pwa/manifest.json.erb", "{}\n"),
+        ("app/views/pwa/service-worker.js", "self.addEventListener(\"push\", async (event) => {\n  console.log(event)\n})\n"),
+    ]);
+    let grouped: Vec<&str> = s.nodes.iter().filter(|n| n.title == "Docs & assets").flat_map(|g| descendants(&s, g)).map(|n| n.title.as_str()).collect();
+    assert!(grouped.is_empty(), "views put away as docs and assets: {grouped:?}");
+}

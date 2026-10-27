@@ -665,7 +665,7 @@ fn build_inner(name: &str, files: Vec<InFile>, opts: crate::layout::Options, mut
             .copied()
             .filter(|&k| {
                 let n = b.get(k);
-                matches!(n.kind, Kind::Doc | Kind::Asset) || (n.kind == Kind::Dir && subtree_is_static(&b, k))
+                is_static(n) || (n.kind == Kind::Dir && subtree_is_static(&b, k))
             })
             .collect();
         let has_code = b.get(c).children.iter().any(|&k| !others.contains(&k) && b.get(k).title != "Build & tooling");
@@ -1118,8 +1118,13 @@ fn ensure_dir(b: &mut Builder, dirs: &mut BTreeMap<String, Id>, root: Id, dir: &
 fn subtree_is_static(b: &Builder, id: Id) -> bool {
     b.get(id).children.iter().all(|&c| {
         let n = b.get(c);
-        matches!(n.kind, Kind::Doc | Kind::Asset) || (n.kind == Kind::Dir && subtree_is_static(b, c))
+        is_static(n) || (n.kind == Kind::Dir && subtree_is_static(b, c))
     })
+}
+
+/// A doc or an asset, but not a Rails view: a template is what an action renders.
+fn is_static(n: &Node) -> bool {
+    matches!(n.kind, Kind::Doc | Kind::Asset) && !matches!(n.subtitle.as_str(), "view" | "partial" | "layout")
 }
 
 /// A compose file's services: built ones zoom into the directory they are
