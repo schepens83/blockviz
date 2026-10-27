@@ -14,6 +14,7 @@ mod crumbs;
 mod diff;
 mod export;
 mod git;
+mod gpu;
 mod gpuipen;
 mod history;
 mod hook;
@@ -155,6 +156,9 @@ fn main() {
         let (w, h) = sized.and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).unwrap_or((1440.0, 900.0));
         return draw_svg(&folder, &out, at.as_deref(), args.iter().any(|a| a == "--dark"), (w, h));
     }
+
+    #[cfg(target_os = "linux")]
+    gpu::prefer_display_card();
 
     // Opening a repository while the app is running shows it there, and raises that window.
     let request = folder.map(|f| Request { repo: f.canonicalize().unwrap_or(f).to_string_lossy().to_string(), compare, title });
