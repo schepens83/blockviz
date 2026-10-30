@@ -46,7 +46,7 @@ use request::Request;
 use std::path::PathBuf;
 use viewer::Viewer;
 
-/// `hook`: shows a commit the coding agent is about to make. `hook claude` reads Claude Code's PreToolUse
+/// `hook`: shows a commit the coding agent is about to make, after staging the `git add`s of its command. `hook claude` reads Claude Code's PreToolUse
 /// input from stdin and answers it; `hook --command "<shell command>" [--cwd <dir>]` takes the command
 /// directly, for agents whose hooks pass it another way, and prints nothing.
 fn hook(args: &[String]) {
@@ -64,6 +64,7 @@ fn hook(args: &[String]) {
         }
     };
     let Some(launch) = hook::launch_for(&command, &cwd) else { return };
+    hook::stage(&launch.adds, &cwd);
     let Some(repo) = git::Repo::find(&launch.folder) else { return };
     // The window outlives this hook, and the agent does not wait for it.
     let mut app = std::process::Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("blockviz-app")));

@@ -1,6 +1,7 @@
 //! `blockviz-app hook`: for a coding agent's hook that runs before a shell command. When the command
-//! is a `git commit`, it opens blockviz on what the commit would make (reusing the running window) and
-//! tells the agent to ask the user first; any other command it ignores.
+//! is a `git commit`, it first stages the `git add`s that come before it in the command (the agent runs
+//! them in the same line, so nothing would be staged yet), then opens blockviz on what the commit would
+//! make (reusing the running window) and tells the agent to ask the user first; any other command it ignores.
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,15 @@ pub struct Commit {
     pub message: Option<String>,
     /// Where it runs, when `git -C <dir>` says.
     pub dir: Option<String>,
+}
+
+/// A `git add` found before the commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Add {
+    /// Where it runs, when `git -C <dir>` says.
+    pub dir: Option<String>,
+    /// What follows `add`.
+    pub args: Vec<String>,
 }
 
 /// A command line in words, quotes and backslashes resolved; the words of each simple command
@@ -91,7 +101,9 @@ pub fn parse_commit(line: &str) -> Option<Commit> {
     commands(line).into_iter().find_map(|words| commit_of(&words))
 }
 
-fn commit_of(words: &[String]) -> Option<Commit> {
+/// Where a simple command runs `git`: the `-C` dir, if any, and the index of its subcommand, past
+/// leading `NAME=value`s and git's own options.
+fn git_invocation(words: &[String]) -> Option<(Option<String>, usize)> {
     let mut i = words.iter().position(|w| !is_assignment(w))?;
     if words.get(i).map(String::as_str) != Some("git") {
         return None;
@@ -111,6 +123,27 @@ fn commit_of(words: &[String]) -> Option<Commit> {
         }
         i += 2;
     }
+    Some((dir, i))
+}
+
+/// A `git add` among the words of a simple command: its arguments, unless it is interactive or help.
+fn add_of(words: &[String]) -> Option<Add> {
+    let (dir, i) = git_invocation(words)?;
+    if words.get(i).map(String::as_str) != Some("add") {
+        return None;
+    }
+    let args = &words[i + 1..];
+    let needs_a_terminal = |a: &String| match a.as_str() {
+        "-p" | "--patch" | "-i" | "--interactive" | "-e" | "--edit" | "--help" | "-h" => true,
+        a => a.starts_with('-') && !a.starts_with("--") && a.contains(['p', 'i', 'e']),
+    };
+    // Stop at `--`: after it everything is a path.
+    let flags = args.iter().take_while(|a| *a != "--");
+    (!flags.clone().any(needs_a_terminal)).then(|| Add { dir, args: args.to_vec() })
+}
+
+fn commit_of(words: &[String]) -> Option<Commit> {
+    let (dir, i) = git_invocation(words)?;
     if words.get(i).map(String::as_str) != Some("commit") {
         return None;
     }
@@ -184,16 +217,28 @@ pub struct Launch {
     pub folder: PathBuf,
     pub compare: &'static str,
     pub title: Option<String>,
+    /// The `git add`s before the commit, to run first.
+    pub adds: Vec<Add>,
 }
 
 /// The comparison for a command run in `cwd`: none when it is not a commit.
 pub fn launch_for(command: &str, cwd: &Path) -> Option<Launch> {
     let c = parse_commit(command)?;
+    let adds = commands(command).iter().take_while(|w| commit_of(w).is_none()).filter_map(|w| add_of(w)).collect();
     let folder = match &c.dir {
         Some(d) => cwd.join(d),
         None => cwd.to_path_buf(),
     };
-    Some(Launch { folder, compare: if c.all { "worktree" } else { "staged" }, title: c.message })
+    Some(Launch { folder, compare: if c.all { "worktree" } else { "staged" }, title: c.message, adds })
+}
+
+/// Runs the `git add`s in `cwd`, so the commit that follows has something staged. A failing one is
+/// ignored: the agent's own command will report it.
+pub fn stage(adds: &[Add], cwd: &Path) {
+    for a in adds {
+        let dir = a.dir.as_ref().map_or_else(|| cwd.to_path_buf(), |d| cwd.join(d));
+        let _ = std::process::Command::new("git").arg("add").args(&a.args).current_dir(dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+    }
 }
 
 /// What Claude Code is told: ask the user, whatever mode the agent is in.
@@ -250,7 +295,7 @@ mod tests {
     fn decides_what_to_show_from_the_agents_input() {
         let input = |tool: &str, cmd: &str| format!("{{\"tool_name\":\"{tool}\",\"tool_input\":{{\"command\":{}}},\"cwd\":\"/work/app\"}}", serde_json::to_string(cmd).unwrap());
         let (cmd, cwd) = claude_command(&input("Bash", "git commit -m \"Add x\"")).unwrap();
-        assert_eq!(launch_for(&cmd, Path::new(&cwd)), Some(Launch { folder: "/work/app".into(), compare: "staged", title: Some("Add x".into()) }));
+        assert_eq!(launch_for(&cmd, Path::new(&cwd)), Some(Launch { folder: "/work/app".into(), compare: "staged", title: Some("Add x".into()), adds: vec![] }));
         let (cmd, cwd) = claude_command(&input("Bash", "git commit -am wip")).unwrap();
         assert_eq!(launch_for(&cmd, Path::new(&cwd)).unwrap().compare, "worktree");
         let (cmd, cwd) = claude_command(&input("Bash", "git -C sub commit -m x")).unwrap();
@@ -259,6 +304,59 @@ mod tests {
         assert_eq!(claude_command(&input("Edit", "git commit")), None);
         assert_eq!(launch_for("git push", Path::new("/work/app")), None);
         assert_eq!(claude_command("not json"), None);
+    }
+
+    fn adds(line: &str) -> Vec<Add> {
+        launch_for(line, Path::new("/w")).unwrap().adds
+    }
+
+    fn add(dir: Option<&str>, args: &[&str]) -> Add {
+        Add { dir: dir.map(String::from), args: args.iter().map(|a| a.to_string()).collect() }
+    }
+
+    #[test]
+    fn collects_the_adds_before_the_commit() {
+        assert_eq!(adds("git add a.py b.py && git commit -m x"), vec![add(None, &["a.py", "b.py"])]);
+        assert_eq!(adds("git add -A && git commit -m x"), vec![add(None, &["-A"])]);
+        assert_eq!(adds("git -C sub add x && git commit -m y"), vec![add(Some("sub"), &["x"])]);
+        assert_eq!(adds("git add a; git add b && git commit -m y"), vec![add(None, &["a"]), add(None, &["b"])]);
+        assert_eq!(adds("git commit -m x && git add later.py"), vec![]);
+        assert_eq!(adds("git commit -m x"), vec![]);
+    }
+
+    #[test]
+    fn leaves_interactive_adds_alone() {
+        for line in ["git add -p && git commit", "git add -ip x && git commit", "git add --patch && git commit", "git add -i && git commit", "git add -e x && git commit", "git add --help && git commit", "git add -h && git commit"] {
+            assert_eq!(adds(line), vec![], "{line}");
+        }
+    }
+
+    #[test]
+    fn stages_what_the_command_would() {
+        use std::process::Command;
+        let dir = std::env::temp_dir().join(format!("blockviz-hook-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let config = ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
+            let out = Command::new("git").args(config).args(args).current_dir(&dir).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.py"), "x = 1\n").unwrap();
+        git(&["add", "a.py"]);
+        git(&["commit", "-q", "-m", "first"]);
+        std::fs::write(dir.join("a.py"), "x = 2\n").unwrap();
+        std::fs::write(dir.join("new.py"), "y = 1\n").unwrap();
+        let launch = launch_for("git add a.py new.py && git commit -m x", &dir).unwrap();
+        stage(&launch.adds, &dir);
+        let mut staged: Vec<_> = git(&["diff", "--cached", "--name-only"]).lines().map(String::from).collect();
+        staged.sort();
+        assert_eq!(staged, ["a.py", "new.py"]);
+        // A failing add changes nothing and does not panic.
+        stage(&[add(None, &["missing.py"])], &dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
